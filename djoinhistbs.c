@@ -114,7 +114,7 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt
 	printf("Tradeoff: %f\n", trade_off);
 
 	multiway_histogram_estimate estimate[servers];
-	memset(estimate, 0, sizeof(multiway_histogram_estimate)*servers);
+	memset(estimate, 0, sizeof estimate);
 
 	// sort in decreasing order of points
 	qsort(opt_data, opt_atu, sizeof(optimization_data_s), sort_optdata_decreasing);

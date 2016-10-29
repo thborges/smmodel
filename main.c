@@ -23,6 +23,7 @@ void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estim
 	int servers, optimization_data_s *opt_data, int pairs);
 void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers, 
 	int *mkspan, int *totalcomm);
+void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu);
 
 int main(int argc, char *argv[]) {
 
@@ -77,13 +78,39 @@ int main(int argc, char *argv[]) {
 
 	map_destroy(map);
 
-	multiway_histogram_estimate agg_server[servers];
-	memset(agg_server, 0, sizeof agg_server);
+	multiway_histogram_estimate agg_server[servers+1];
+	fread(agg_server, sizeof(multiway_histogram_estimate), servers+1, f);
+
+	// print optimization data
+	/*printf("pair\tpoints\tlcomm\trcells");
+	for(int s = 1; s <= servers; s++)
+		printf("\t%d", s);
+	printf("\n");
+
+	for(int i = 0; i < opt_atu; i++) {
+		printf("%d\t%f\t%f", i, opt_data[i].pnts, opt_data[i].lcell->points);
+		for(int c = 0; c < opt_data[i].rcells_size; c++) {
+			printf("\trc.%d.%d", opt_data[i].rcells[c].xr, opt_data[i].rcells[c].yr);
+		}
+		printf("\n\t\tplace");
+		for(int c = 0; c < opt_data[i].rcells_size; c++) {
+			printf("\t%d", opt_data[i].rcells[c].cell->place);
+		}
+		printf("\n\t\tpoints");
+		for(int c = 0; c < opt_data[i].rcells_size; c++) {
+			printf("\t%f", opt_data[i].rcells[c].cell->points);
+		}
+		printf("\n");
+	}*/
+
+	reset_opt_data_copies(opt_data, opt_atu);
+
 
 	#ifdef LAGRANGE
 	// calculate an upper bound using greedy algorithm
 	bs_optimize_hr(&hr, servers+1, opt_data, opt_atu, agg_server);
 	// call lagrangian optimization
+	reset_opt_data_copies(opt_data, opt_atu);
 	lagrange_sm_optimize_hr(&hr, servers, opt_data, opt_atu);
 	#endif
 
@@ -100,7 +127,14 @@ int main(int argc, char *argv[]) {
 	int makespan, totalcomm;
 	histogram_print_estimate("server", estimate, servers, &makespan, &totalcomm);
 
-	printf("\nMakespan: %d, Comm: %d\n\n", makespan, totalcomm);
+    char *aux = getenv("LP_COMM");
+    double g = aux ? atof(aux) : 1.0;
+    aux = getenv("LP_MKSP");
+    double fm = aux ? atof(aux) : servers;
+
+	printf("\nValues for obj, with costs observing FM rules\n");
+	printf("Obj: %.0f, Makespan: %d, Comm: %d\n\n",
+		fm * makespan + g * totalcomm, makespan, totalcomm);
 
 	fclose(f);
 }
@@ -229,5 +263,20 @@ void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate,
 		*mkspan = max_to_pnts;
 	if (totalcomm)
 		*totalcomm = io_pnts;
+}
+
+void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu) {
+	// reset previous copies
+	for(int cell = 0; cell < opt_atu; cell++) {
+		histogram_cell *lc = opt_data[cell].lcell;
+		lc->copies = 0;
+		SET_IN_PLACE(lc->copies, lc->place);
+
+		for(int c = 0; c < opt_data[cell].rcells_size; c++) {
+			histogram_cell *rc = opt_data[cell].rcells[c].cell;
+			rc->copies = 0;
+			SET_IN_PLACE(rc->copies, rc->place);
+		}
+	}
 }
 
