@@ -16,14 +16,19 @@ void histogram_alloc(dataset_histogram *dh, int xqtd, int yqtd);
 void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
 	int opt_atu, multiway_histogram_estimate *agg_server);
 void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
-    optimization_data_s *opt_data, int pairs /*, multiway_histogram_estimate *agg_server*/);
+	optimization_data_s *opt_data, int pairs, multiway_histogram_estimate *agg_server,
+	double dualvalues[pairs]);
 void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
-	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server);
+	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server,
+	bool only_root_node);
 void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estimate, 
 	int servers, optimization_data_s *opt_data, int pairs);
 void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers, 
 	int *mkspan, int *totalcomm);
 void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu);
+
+void histogram_set_data_grid(dataset *ds, dataset_histogram_persist *hp);
+histogram_cell *histogram_get_cell(dataset_histogram *dh, unsigned short x, unsigned short y);
 
 int main(int argc, char *argv[]) {
 
@@ -42,9 +47,20 @@ int main(int argc, char *argv[]) {
 	fread(&opt_atu, sizeof(int), 1, f);
 	fread(&servers, sizeof(int), 1, f);
 
-	dataset_histogram hr;
-	fread(&hr, sizeof(dataset_histogram), 1, f);
-	histogram_alloc(&hr, hr.xqtd, hr.yqtd);
+	dataset ds;
+	dataset_histogram *hr = &ds.metadata.hist;
+	fread(hr, sizeof(dataset_histogram), 1, f);
+
+	int size;
+	fread(&size, sizeof(int), 1, f);
+	char hdata[size];
+	fread(hdata, size, 1, f);
+
+	dataset_histogram_persist *hp = (dataset_histogram_persist*)hdata;
+	// code from dataset_set_histogram
+	ds.metadata.hist.htype = hp->htype;
+	ds.metadata.hist.get_cell = histogram_get_cell;
+	histogram_set_data_grid(&ds, hp);
 
 	optimization_data_s opt_data[opt_atu];	
 	CppMap *map = map_create();
@@ -108,22 +124,22 @@ int main(int argc, char *argv[]) {
 
 	#ifdef LAGRANGE
 	// calculate an upper bound using greedy algorithm
-	bs_optimize_hr(&hr, servers+1, opt_data, opt_atu, agg_server);
+	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server);
 	// call lagrangian optimization
 	reset_opt_data_copies(opt_data, opt_atu);
-	lagrange_sm_optimize_hr(&hr, servers, opt_data, opt_atu);
+	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, NULL);
 	#endif
 
 	#ifdef MIP
-	lpi_sm_optimize_hr(&hr, servers, opt_data, opt_atu, agg_server);
+	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, false);
 	#endif
 
 	// print the summary 
-	printf("\n\nSummary:\n");
+	//printf("\n\nSummary:\n");
 	multiway_histogram_estimate estimate[servers];
 	memset(estimate, 0, sizeof estimate);
 
-	totalize_estimate(&hr, estimate, servers, opt_data, opt_atu);
+	totalize_estimate(hr, estimate, servers, opt_data, opt_atu);
 	int makespan, totalcomm;
 	histogram_print_estimate("server", estimate, servers, &makespan, &totalcomm);
 
@@ -137,15 +153,6 @@ int main(int argc, char *argv[]) {
 		fm * makespan + g * totalcomm, makespan, totalcomm);
 
 	fclose(f);
-}
-
-void histogram_alloc(dataset_histogram *dh, int xqtd, int yqtd) {
-	assert(xqtd > 0 && yqtd > 0 && "X and Y must be greater than zero.");
-	dh->xqtd = xqtd;
-	dh->yqtd = yqtd;
-	dh->xtics = g_new(double, dh->xqtd+1);
-	dh->ytics = g_new(double, dh->yqtd+1);
-	dh->hcells = g_new0(histogram_cell, dh->xqtd*dh->yqtd);
 }
 
 int compare_right_opt_data(const void* x, const void*y) {
@@ -194,7 +201,7 @@ void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estim
 
 	for(int i = 0; i < pairs; i++) {
 		// to_pnts
-		histogram_cell *resultcell = GET_HISTOGRAM_CELL(hr, opt_data[i].xl, opt_data[i].yl);
+		histogram_cell *resultcell = hr->get_cell(hr, opt_data[i].xl, opt_data[i].yl);
 		estimate[resultcell->place].to_pnts += opt_data[i].pnts;
 
 		// lcell io_pnts
@@ -213,10 +220,8 @@ void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estim
 		}
 	}
 
-	//sort by cell id
 	qsort(rcells, rcells_atu, sizeof(right_opt_data*), compare_right_opt_data);
 	
-	// loop trough rcells, ignoring repeated ids
 	histogram_cell *last_cell = NULL;
 	for(int i=0; i < rcells_atu; i++) {
 		if (last_cell != rcells[i]->cell) {
@@ -231,12 +236,13 @@ void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estim
 	g_free(rcells);
 };
 
+
 void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers, 
 	int *mkspan, int *totalcomm) {
 
 	int to_pnts = 0, io_pnts = 0;
-	printf("%6s   Makespan       Comm\n", name);
-	printf("------ ---------- ----------\n");
+	//printf("%6s   Makespan       Comm\n", name);
+	//printf("------ ---------- ----------\n");
     int max_to_pnts = (int)estimate[1].to_pnts;
     int max_io_pnts = (int)estimate[1].io_pnts;
     int min_to_pnts = (int)estimate[1].to_pnts;
@@ -254,10 +260,10 @@ void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate,
         if (min_io_pnts > (int)estimate[s].io_pnts)
             min_io_pnts = (int)estimate[s].io_pnts;
 	}
-	printf("------ ---------- ----------\n");
-	printf("total  %10d %10d\n", to_pnts, io_pnts);
-	printf("max    %10d %10d\n", max_to_pnts, max_io_pnts);
-	printf("min    %10d %10d\n", min_to_pnts, min_io_pnts);
+	//printf("------ ---------- ----------\n");
+	//printf("total  %10d %10d\n", to_pnts, io_pnts);
+	//printf("max    %10d %10d\n", max_to_pnts, max_io_pnts);
+	//printf("min    %10d %10d\n", min_to_pnts, min_io_pnts);
 
 	if (mkspan)
 		*mkspan = max_to_pnts;
@@ -278,5 +284,55 @@ void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu) {
 			SET_IN_PLACE(rc->copies, rc->place);
 		}
 	}
+}
+
+void histogram_alloc(dataset_histogram *dh, int xqtd, int yqtd) {
+	assert(xqtd > 0 && yqtd > 0 && "X and Y must be greater than zero.");
+	grid_histogram_data *ghd = g_new0(grid_histogram_data, 1);
+	dh->extra_data = ghd;
+	ghd->xqtd = xqtd;
+	ghd->yqtd = yqtd;
+	ghd->xtics = g_new(double, xqtd+1);
+	ghd->ytics = g_new(double, yqtd+1);
+	ghd->hcells = g_new0(histogram_cell, xqtd*yqtd);
+
+	for(int x = 0; x < xqtd; x++) {
+		for(int y = 0; y < yqtd; y++) {
+			histogram_cell *cell = GET_GRID_HISTOGRAM_CELL(ghd, x, y);
+			cell->x = x;
+			cell->y = y;
+		}
+	}
+}
+
+void histogram_set_data_grid(dataset *ds, dataset_histogram_persist *hp) {
+
+	ds->metadata.mbr = hp->mbr;
+
+	grid_histogram_data *ghd_orig = (grid_histogram_data*)&hp->extra_data[0];
+
+	histogram_alloc(&ds->metadata.hist, ghd_orig->xqtd, ghd_orig->yqtd);
+
+	grid_histogram_data *ghd = (grid_histogram_data*)ds->metadata.hist.extra_data;
+	ghd->xsize = ghd_orig->xsize;
+	ghd->ysize = ghd_orig->ysize;
+
+	int pos = sizeof(grid_histogram_data);
+
+	double *xtics = (double*)&hp->extra_data[pos];
+	memcpy(ghd->xtics, xtics, sizeof(double)*(ghd_orig->xqtd+1));
+	pos += sizeof(double) * (ghd_orig->xqtd+1);
+
+	double *ytics = (double*)&hp->extra_data[pos];
+	memcpy(ghd->ytics, ytics, sizeof(double)*(ghd_orig->yqtd+1));
+	pos += sizeof(double) * (ghd_orig->yqtd+1);
+
+	histogram_cell *hcells = (histogram_cell*)&hp->extra_data[pos];
+	memcpy(ghd->hcells, hcells, sizeof(histogram_cell) * ghd_orig->yqtd * ghd_orig->xqtd);
+}
+
+histogram_cell *histogram_get_cell(dataset_histogram *dh, unsigned short x, unsigned short y) {
+	grid_histogram_data *ghd = (grid_histogram_data*)dh->extra_data;
+	return GET_GRID_HISTOGRAM_CELL(ghd, x, y);
 }
 

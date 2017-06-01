@@ -1,8 +1,12 @@
 
 #include <stdlib.h>
 #include <glibwrap.h>
+//#include <multiway-join.h>
+//#include <dataset.h>
+//#include <utils.h>
+#include "structs.h"
 #include <limits.h>
-#include <structs.h>
+#include "sm.h"
 
 double trade_off;
 
@@ -63,18 +67,16 @@ int choose_best_server(double *total_io, int servers, multiway_histogram_estimat
 	*/
 
 	// balance the CPU 
-	int max_server = 1;
 	int min_server = 1;
-	double max_to_pnts = agg_server[1].to_pnts + estimate[1].to_pnts;
-	double min_to_pnts = agg_server[1].to_pnts + estimate[1].to_pnts;
+	double max_to_pnts = /*agg_server[1].to_pnts + */ estimate[1].to_pnts;
+	double min_to_pnts = /*agg_server[1].to_pnts + */ estimate[1].to_pnts;
 	for(int s = 2; s < servers; s++) {
-		if (agg_server[s].to_pnts + estimate[s].to_pnts > max_to_pnts) {
-			max_server = s;
-			max_to_pnts = agg_server[s].to_pnts + estimate[s].to_pnts;
+		if (/*agg_server[s].to_pnts + */ estimate[s].to_pnts > max_to_pnts) {
+			max_to_pnts = /*agg_server[s].to_pnts + */ estimate[s].to_pnts;
 		}
-		if (agg_server[s].to_pnts + estimate[s].to_pnts < min_to_pnts) {
+		if (/*agg_server[s].to_pnts + */ estimate[s].to_pnts < min_to_pnts) {
 			min_server = s;
-			min_to_pnts = agg_server[s].to_pnts + estimate[s].to_pnts;
+			min_to_pnts = /*agg_server[s].to_pnts + */ estimate[s].to_pnts;
 		}
 	}
 	double diff = max_to_pnts - min_to_pnts;
@@ -111,10 +113,10 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt
 	trade_off = toff ? atof(toff) : 0.0;
 	if (trade_off <= 0.0)
 		trade_off = 0.2;
-	printf("Tradeoff: %f\n", trade_off);
+	//printf("Tradeoff: %f\n", trade_off);
 
 	multiway_histogram_estimate estimate[servers];
-	memset(estimate, 0, sizeof estimate);
+	memset(estimate, 0, sizeof(multiway_histogram_estimate)*servers);
 
 	// sort in decreasing order of points
 	qsort(opt_data, opt_atu, sizeof(optimization_data_s), sort_optdata_decreasing);
@@ -123,7 +125,7 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt
 		int xl = opt_data[c].xl;
 		int yl = opt_data[c].yl;
 
-		histogram_cell *resultcell = GET_HISTOGRAM_CELL(hr, xl, yl);
+		histogram_cell *resultcell = hr->get_cell(hr, xl, yl);
 
 		// choose the best server for the L cell
 		int choosed = choose_best_server(opt_data[c].comm, servers, estimate, agg_server);
@@ -146,5 +148,10 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt
 
 		estimate[choosed].to_pnts += opt_data[c].pnts;
 	}
+
+	double final_mkspan, final_comm;
+	double Zheur = get_sm_objective(hr, opt_data, opt_atu, servers, 1, servers, 1, NULL, NULL, &final_mkspan, &final_comm);
+	printf("After BS\nZ\tMkspan\tComm\n%.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
+
 }
 
