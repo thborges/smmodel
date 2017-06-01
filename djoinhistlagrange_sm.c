@@ -136,7 +136,7 @@ double find_knapsack_bestf_capacity(optimization_data_s *opt_data, int pairs, in
 
 void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int pairs, multiway_histogram_estimate *agg_server,
-	double dualvalues[pairs]) {
+	double dualvalues[pairs], double f, double *return_mkspan, double *return_comm) {
 
 	lagrange_model_data md;
 	md.u = g_new(double, pairs);
@@ -146,7 +146,7 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	char *aux = getenv("LP_COMM");
 	md.g = aux ? atof(aux) : 1.0;
 	aux = getenv("LP_MKSP");
-	md.f = aux ? atof(aux) : servers;
+	md.f = aux ? atof(aux) : f;
 	//printf("Tradeoff g: %f, f: %f\n", md.g, md.f);
 
 	// find a multiplier to reduce knapsack capacity
@@ -382,7 +382,7 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		k++;
 	}
 
-	printf("Last iteration k: %d\n", k);
+	printf("\nLast iteration k: %d\n", k);
 
 	// debug md.u values	
 	/*printf("-------\n");
@@ -400,6 +400,9 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	lp_optimize_hr_round_decreasing_low_comm(hr, servers, opt_data, pairs, best_x_ijk, agg_server, true, md.f, md.g);
 	Zheur = get_sm_objective(hr, opt_data, pairs, md.f, md.g, servers, multiplier, NULL, NULL, &final_mkspan, &final_comm);
 	printf("After LR rounding\nZ\tMkspan\tComm\n%.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
+
+	*return_mkspan = final_mkspan;
+	*return_comm = final_comm;
 
 	/* print result for Prof. Les instances */
 	/*for(int s = 1; s <= servers; s++) {

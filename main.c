@@ -9,23 +9,32 @@
 #include <stdlib.h>
 #include <glibwrap.h>
 #include <assert.h>
+#include <float.h>
 #include "structs.h"
 #include "cpphash.h"
 
-void histogram_alloc(dataset_histogram *dh, int xqtd, int yqtd);
+void lp_optimize_hr(dataset_histogram *hr, int servers,
+	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_sever,
+	double dualvalues[opt_atu]);
+
 void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
 	int opt_atu, multiway_histogram_estimate *agg_server);
+
 void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int pairs, multiway_histogram_estimate *agg_server,
-	double dualvalues[pairs]);
+	double dualvalues[pairs], double f, double *return_mkspan, double *return_comm);
+
 void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server,
 	bool only_root_node);
+
+
 void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estimate, 
 	int servers, optimization_data_s *opt_data, int pairs);
 void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers, 
 	int *mkspan, int *totalcomm);
 void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu);
+
 
 void histogram_set_data_grid(dataset *ds, dataset_histogram_persist *hp);
 histogram_cell *histogram_get_cell(dataset_histogram *dh, unsigned short x, unsigned short y);
@@ -123,11 +132,28 @@ int main(int argc, char *argv[]) {
 
 
 	#ifdef LAGRANGE
-	// calculate an upper bound using greedy algorithm
-	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server);
 	// call lagrangian optimization
-	reset_opt_data_copies(opt_data, opt_atu);
-	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, NULL);
+	double smaller_diff = DBL_MAX;
+	double most_similar_f;
+	double current_f = servers;
+	for(int i = 0; i < 10; i++) {
+		double aux_makespan, aux_comm;
+		printf("For f=%f\n", current_f);
+
+		// calculate an upper bound using greedy algorithm
+		bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server);
+		reset_opt_data_copies(opt_data, opt_atu);
+		lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, NULL, current_f, &aux_makespan, &aux_comm);
+
+		double aux = fabs(current_f * aux_makespan - aux_comm);
+		if (aux < smaller_diff) {
+			smaller_diff = aux;
+			most_similar_f = current_f;
+		}
+
+		current_f = round(aux_comm/aux_makespan*1000.0)/1000.0;
+	}
+	printf("f should be: %f\n", most_similar_f);
 	#endif
 
 	#ifdef MIP
