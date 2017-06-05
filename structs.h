@@ -138,5 +138,7 @@ typedef struct {
 	double inters;
 } multiway_histogram_estimate;
 
+void print_instance_and_solution_fo_file(optimization_data_s *opt_data, int opt_atu, int servers, int map[opt_atu][servers+1]);
+
 #endif
 

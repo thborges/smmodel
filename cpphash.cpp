@@ -6,6 +6,7 @@
  *      Author: Thiago Borges de Oliveira 
  */
 
+#include <cstddef>
 #include <map>
 #include "cpphash.h"
 

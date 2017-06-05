@@ -14,35 +14,36 @@ typedef struct {
 	optimization_data_s* opt_data;
 } thunk_sort_lagrange;
 
-decl_qsort_p_cmp(sort_remaining_decreasing_larger_cost, x, y, thunk) {
+decl_qsort_p_cmp(sort_remaining_decreasing_regret_cost, x, y, thunk) {
 	int iy = *(int*)y;
 	int ix = *(int*)x;
 	thunk_sort_lagrange *thunkd = (thunk_sort_lagrange*)thunk;
 
-	double comm_ix2 = MAX(thunkd->opt_data[ix].comm[1], thunkd->opt_data[ix].comm[2]);
-	double comm_ix = MIN(thunkd->opt_data[ix].comm[1], thunkd->opt_data[ix].comm[2]);
-	for(int s = 1; s <= thunkd->servers; s++) {
-		if (comm_ix < thunkd->opt_data[ix].comm[s]) {
-			comm_ix2 = comm_ix;
-			comm_ix = thunkd->opt_data[ix].comm[s];
-		}
+	double comm_ix_max = thunkd->opt_data[ix].comm[1];
+	double comm_ix_min = thunkd->opt_data[ix].comm[1];
+	for(int s = 2; s <= thunkd->servers; s++) {
+		if (comm_ix_max < thunkd->opt_data[ix].comm[s])
+			comm_ix_max = thunkd->opt_data[ix].comm[s];
+		if (comm_ix_min > thunkd->opt_data[ix].comm[s])
+			comm_ix_min = thunkd->opt_data[ix].comm[s];
+		
 	}
-	comm_ix = comm_ix2 - comm_ix;
+	double regret_ix = comm_ix_max - comm_ix_min;
 
-	double comm_iy2 = MAX(thunkd->opt_data[iy].comm[1], thunkd->opt_data[iy].comm[2]);
-	double comm_iy = MIN(thunkd->opt_data[iy].comm[1], thunkd->opt_data[iy].comm[2]);
+	double comm_iy_max = MAX(thunkd->opt_data[iy].comm[1], thunkd->opt_data[iy].comm[2]);
+	double comm_iy_min = MIN(thunkd->opt_data[iy].comm[1], thunkd->opt_data[iy].comm[2]);
 	for(int s = 1; s <= thunkd->servers; s++) {
-		if (comm_iy < thunkd->opt_data[iy].comm[s]) {
-			comm_iy2 = comm_iy;
-			comm_iy = thunkd->opt_data[iy].comm[s];
-		}
+		if (comm_iy_max < thunkd->opt_data[iy].comm[s])
+			comm_iy_max = thunkd->opt_data[iy].comm[s];
+		if (comm_iy_min > thunkd->opt_data[iy].comm[s])
+			comm_iy_min = thunkd->opt_data[iy].comm[s];
 	}
-	comm_iy = comm_iy2 - comm_iy;
+	double regret_iy = comm_iy_max - comm_iy_min;
 
 	double cost_x = thunkd->f * thunkd->opt_data[ix].pnts + 
-					thunkd->g * comm_ix;
+					thunkd->g * regret_ix;
 	double cost_y = thunkd->f * thunkd->opt_data[iy].pnts +
-					thunkd->g * comm_iy;
+					thunkd->g * regret_iy;
 
 	if (cost_x == cost_y) return 0;
 	if (cost_x < cost_y) return 1;
@@ -120,14 +121,14 @@ void remove_double_processed_items(int servers, optimization_data_s *opt_data, i
 	} while (dbl_proc_cnt > 0);
 
 	// assert method works
-	for(int cell = 0; cell < opt_atu; cell++) {
+	/*for(int cell = 0; cell < opt_atu; cell++) {
 		int integrally = 0;
 		for(int s = 0; s < servers; s++) {
 			if (x[s][cell] > 0)
 				integrally++;
 		}
 		assert(integrally <= 1);
-	}
+	}*/
 	//printf("Remove double iters %d\n", iters);
 }
 
@@ -190,7 +191,7 @@ void schedule_non_assigned_items(int servers, optimization_data_s *opt_data, int
 	sthunk.g = g;
 	sthunk.servers = servers;
 	sthunk.opt_data = opt_data;
-	qsort_p(remaining, rem_count, sizeof(int), sort_remaining_decreasing_larger_cost, &sthunk);
+	qsort_p(remaining, rem_count, sizeof(int), sort_remaining_decreasing_regret_cost, &sthunk);
 
 	// sort by increasing makespan
 	qsort(server_mkspan, servers, sizeof(aux_server_mkspan), &double_increasing_compare);
@@ -231,6 +232,135 @@ void schedule_non_assigned_items(int servers, optimization_data_s *opt_data, int
 			x0 = server_mkspan[servers-1].mkspan;
 		}
 	}
+}
+
+void three_most_loaded_server(int servers, double server_load[servers], double values[3], int indxs[3]) {
+	// identify the most loaded server
+	assert(servers >= 3);
+	int large = 0;
+	if (server_load[1] > server_load[large]) large = 1;
+	if (server_load[2] > server_load[large]) large = 2;
+	int smaller = 0;
+	if (server_load[1] < server_load[smaller]) smaller = 1;
+	if (server_load[2] < server_load[smaller]) smaller = 2;
+	int middle = 3 - large - smaller;
+	values[0] = server_load[large];
+	values[1] = server_load[middle];
+	values[2] = server_load[smaller];
+	indxs[0] = large;
+	indxs[1] = middle;
+	indxs[2] = smaller;
+	for(int s = 0; s < servers; s++) {
+		if (server_load[s] > values[0]) {
+			indxs[2] = indxs[1];
+			indxs[1] = indxs[0];
+			indxs[0] = s;
+			values[2] = values[1];
+			values[1] = values[0];
+			values[0] = server_load[s];
+		}
+	}
+}
+
+void improve_transformed_solution_exchange_pairs(int servers, optimization_data_s *opt_data, int pairs, 
+	int x[servers][pairs], double f, double g) {
+
+	// calc server makespan
+	double server_load[servers];
+	memset(server_load, 0, sizeof server_load);
+
+	int rem_count = 0;
+	int where[pairs];
+	for(int p=0; p < pairs; p++) {
+		for(int s=0; s < servers; s++) {
+			if (x[s][p] == 1) {
+				where[p] = s;
+				server_load[s] += opt_data[p].pnts;
+				break;
+			}
+		}
+	}
+
+	double old_x0;
+	double mostloaded[3];
+	int mostloadedidx[3];
+	three_most_loaded_server(servers, server_load, mostloaded, mostloadedidx);
+	old_x0 = mostloaded[0];
+	double x0 = mostloaded[0];
+	
+	int exchanged_pairs_cnt = 0;
+	double total_cost_reduction = 0;
+	for(int j1 = 0; j1 < pairs; j1++) {
+		int best_exchange = -1;
+		double best_exchange_cost = 0;
+		int pj1 = where[j1];
+
+		for(int j2 = 0; j2 < pairs; j2++) {
+			if (j1 == j2) continue;
+			if (where[j1] == where[j2]) continue;
+
+			int pj2 = where[j2];
+
+			// increase makespan?
+			double aux_mostloaded[3];
+			aux_mostloaded[0] = mostloaded[0];
+			aux_mostloaded[1] = mostloaded[1];
+			aux_mostloaded[2] = mostloaded[2];
+			int server_inc = opt_data[j1].pnts > opt_data[j2].pnts ? pj2 : pj1;
+			int server_dec = server_inc == pj1 ? pj2 : pj1;
+			double pdiff = fabs(opt_data[j1].pnts - opt_data[j2].pnts);
+			for(int i = 0; i < 3; i++) {
+				if (server_inc == mostloadedidx[i])
+					aux_mostloaded[i] += pdiff;
+			}
+			for(int i = 0; i < 3; i++) {
+				if (server_dec == mostloadedidx[i])
+					aux_mostloaded[i] -= pdiff;
+			}
+			double new_x0 = aux_mostloaded[0];
+			if (new_x0 < aux_mostloaded[1]) new_x0 = aux_mostloaded[1];
+			if (new_x0 < aux_mostloaded[2]) new_x0 = aux_mostloaded[2];
+
+			// the server for which the load increases becomes the new x0?
+			double new_server_inc = server_load[server_inc] + pdiff;
+			if (new_x0 < new_server_inc) new_x0 = new_server_inc;
+
+			// cost increase/decrease
+			double cost_inc = - opt_data[j1].comm[pj1+1]
+							  - opt_data[j2].comm[pj2+1]
+							  + opt_data[j1].comm[pj2+1]
+							  + opt_data[j2].comm[pj1+1];
+
+			double worthiness = f * (new_x0 - x0) + g * cost_inc;
+
+			if (worthiness < best_exchange_cost) {
+				best_exchange_cost = worthiness;
+				best_exchange = j2;
+			}
+		}
+
+		if (best_exchange != -1) {
+			exchanged_pairs_cnt++;
+			total_cost_reduction += best_exchange_cost;
+
+			int j2 = best_exchange;
+			int pj2 = where[j2];
+			assert(x[pj1][j1]);
+			assert(x[pj2][j2]);
+			x[pj1][j1] = 0;
+			x[pj2][j2] = 0;
+			x[pj2][j1] = 1;
+			x[pj1][j2] = 1;
+			where[j1] = pj2;
+			where[j2] = pj1;
+			server_load[pj1] += - opt_data[j1].pnts + opt_data[j2].pnts;
+			server_load[pj2] += - opt_data[j2].pnts + opt_data[j1].pnts;
+
+			three_most_loaded_server(servers, server_load, mostloaded, mostloadedidx);
+			x0 = mostloaded[0];
+		}
+	}
+	//printf("Exchanged %d, z decreased %f, Old x0 %f, new x0 %f\n", exchanged_pairs_cnt, total_cost_reduction, old_x0, x0);
 }
 
 void improve_transformed_solution(int servers, optimization_data_s *opt_data, int pairs, 
@@ -311,149 +441,6 @@ void improve_transformed_solution(int servers, optimization_data_s *opt_data, in
 	//printf("Old x0 %f, new x0 %f\n", old_x0, x0);
 }
 
-void improve_transformed_solution_old(int servers, optimization_data_s *opt_data, int pairs, 
-	int x[servers][pairs], double f, double g) {
-
-	// calc server makespan
-	aux_server_mkspan server_mkspan[servers];
-	for(int s=0; s< servers; s++) {
-		server_mkspan[s].id = s;
-		server_mkspan[s].mkspan = 0;
-	}
-
-	int rem_count = 0;
-	int remaining[pairs];
-	for(int p=0; p < pairs; p++) {
-		for(int s=0; s < servers; s++) {
-			if (x[s][p] == 1) {
-				server_mkspan[s].mkspan += opt_data[p].pnts;
-				break;
-			}
-		}
-	}
-
-	double old_x0;
-	double x0;
-
-	// identify the large server
-	qsort(server_mkspan, servers, sizeof(aux_server_mkspan), &double_increasing_compare);
-	x0 = server_mkspan[servers-1].mkspan;
-
-	old_x0 = x0;
-	double makespan_difference;
-	int pair_moved[pairs]; // to prevent infinite loop
-	memset(pair_moved, 0, sizeof pair_moved);
-	int improved;
-	do {
-		if (servers < 2)
-			break;
-
-		improved = 0;
-		int cs = servers-1;
-		int cs_orig = server_mkspan[cs].id;
-		makespan_difference = server_mkspan[cs].mkspan - server_mkspan[cs-1].mkspan;
-
-		// try to remove some item, without increasing any cost
-		for(int p=0; p < pairs; p++) {
-			if (x[cs_orig][p] == 0 || pair_moved[p] >= 100) // prevent deadlock
-				continue;
-
-			int large_mkspan_excess_server = -1;
-			double large_mkspan_excess = 0;
-			double comm_atu = opt_data[p].comm[cs_orig+1];
-			for(int ds = 0; ds < servers; ds++) {
-				if (ds == cs)
-					continue;
-
-				int ds_orig = server_mkspan[ds].id;
-
-				double mkspan_excess = x0 - server_mkspan[ds].mkspan;
-				if (comm_atu >= opt_data[p].comm[ds_orig+1] && 
-				   (mkspan_excess >= opt_data[p].pnts)) {
-					if (mkspan_excess > large_mkspan_excess) {
-						large_mkspan_excess = mkspan_excess;
-						large_mkspan_excess_server = ds;
-					}
-				}
-			}
-
-			if (large_mkspan_excess_server != -1) {
-				int ds = large_mkspan_excess_server;
-				int ds_orig = server_mkspan[ds].id;
-				x[ds_orig][p] = 1;
-				x[cs_orig][p] = 0;
-				server_mkspan[ds].mkspan += opt_data[p].pnts;
-				server_mkspan[cs].mkspan -= opt_data[p].pnts;
-				pair_moved[p]++;
-	
-				improved++;
-
-				// identify the large server again
-				qsort(server_mkspan, servers, sizeof(aux_server_mkspan), &double_increasing_compare);
-				x0 = server_mkspan[servers-1].mkspan;
-				cs_orig = server_mkspan[cs].id;
-				makespan_difference = server_mkspan[cs].mkspan - server_mkspan[cs-1].mkspan;
-				//printf("Pair %d from %d to %d\n", p, cs_orig, ds_orig);
-				if (makespan_difference < 0) // server is not the larger anymore
-					break;
-			}
-
-		}
-
-	} while (improved > 0);
-	//printf("Makespan reduced from %f to %f: %f%%, ", old_x0, x0, (old_x0-x0)/old_x0);
-
-	// try to reduce communication cost
-	// identify the large server
-	double comm_reduced = 0;
-	qsort(server_mkspan, servers, sizeof(aux_server_mkspan), &double_increasing_compare);
-	x0 = server_mkspan[servers-1].mkspan;
-	old_x0 = x0;
-	for(int cs = servers-1; cs >= 0; cs--) {
-		int cs_orig = server_mkspan[cs].id;
-		for(int p=0; p < pairs; p++) {
-			if (x[cs_orig][p] == 0)
-				continue;
-
-			double comm_atu = opt_data[p].comm[cs_orig+1];
-			for(int ds = 0; ds < servers; ds++) {
-				if (ds == cs)
-					continue;
-
-				int ds_orig = server_mkspan[ds].id;
-
-				if (comm_atu > opt_data[p].comm[ds_orig+1] && 
-				   (x0 - server_mkspan[ds].mkspan >= opt_data[p].pnts)) {
-					x[ds_orig][p] = 1;
-					x[cs_orig][p] = 0;
-					server_mkspan[ds].mkspan += opt_data[p].pnts;
-					server_mkspan[cs].mkspan -= opt_data[p].pnts;
-					comm_reduced += (comm_atu - opt_data[p].comm[ds_orig+1]);
-					//printf("Pair %d from %d to %d\n", p, cs_orig, ds_orig);
-		
-					x0 = server_mkspan[0].mkspan;
-					for(int s = 1; s < servers; s++) {
-						if (x0 < server_mkspan[s].mkspan)
-							x0 = server_mkspan[s].mkspan;
-					}
-					break;
-				}
-			}
-		}
-	}
-	qsort(server_mkspan, servers, sizeof(aux_server_mkspan), &double_increasing_compare);
-	x0 = server_mkspan[servers-1].mkspan;
-
-
-	//printf(" x0 again %f%c, comm. cost reduced %f\n", x0, old_x0 > x0 ? 'x' : ' ', comm_reduced);
-
-	/*printf("-----\n");
-	for(int s = 0; s < servers; s++)
-		print_makespan_gauge(server_mkspan[s].id, server_mkspan[s].mkspan, x0);	
-	exit(1); */
-}
-
-
 void lp_optimize_hr_round_decreasing_low_comm(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, int x[servers][opt_atu],
 	multiway_histogram_estimate *agg_server, char remove_double_proc,
@@ -475,6 +462,7 @@ void lp_optimize_hr_round_decreasing_low_comm(dataset_histogram *hr, int servers
 		remove_double_processed_items(servers, opt_data, opt_atu, x, f, g);
 		schedule_non_assigned_items(servers, opt_data, opt_atu, x, f, g); 
 		improve_transformed_solution(servers, opt_data, opt_atu, x, f, g);
+		improve_transformed_solution_exchange_pairs(servers, opt_data, opt_atu, x, f, g);
 	}
 
 	for(int cell = 0; cell < opt_atu; cell++) {
@@ -530,7 +518,7 @@ void lp_optimize_hr_round_decreasing_low_comm(dataset_histogram *hr, int servers
 		}
 	}
 
-	assert(qtdatu == 0);
+	//assert(qtdatu == 0);
 
 	thunk_sort_lagrange sthunk;
 	sthunk.servers = servers;
@@ -618,5 +606,4 @@ void set_cell_place_from_partial_x(dataset_histogram *hr, int servers, int pairs
 		}
 	}
 }
-
 

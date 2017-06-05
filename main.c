@@ -35,9 +35,12 @@ void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate,
 	int *mkspan, int *totalcomm);
 void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu);
 
-
 void histogram_set_data_grid(dataset *ds, dataset_histogram_persist *hp);
 histogram_cell *histogram_get_cell(dataset_histogram *dh, unsigned short x, unsigned short y);
+
+double runtime_diff_ms(struct timespec *start, struct timespec *end) {
+	return ( end->tv_sec - start->tv_sec ) * 1000.0 + (double)( end->tv_nsec - start->tv_nsec ) / 1E6;
+}
 
 int main(int argc, char *argv[]) {
 
@@ -127,23 +130,29 @@ int main(int argc, char *argv[]) {
 		}
 		printf("\n");
 	}*/
+	
+	print_instance_and_solution_fo_file(opt_data, opt_atu, servers, NULL);
 
 	reset_opt_data_copies(opt_data, opt_atu);
 
 
-	#ifdef LAGRANGE
+	#ifdef LAGRANGE_FINDF
 	// call lagrangian optimization
+	// code to find f
 	double smaller_diff = DBL_MAX;
 	double most_similar_f;
-	double current_f = servers;
+	char *auxmksp = getenv("LP_MKSP");
+	double current_f = auxmksp ? atof(auxmksp) : servers;
+
 	for(int i = 0; i < 10; i++) {
 		double aux_makespan, aux_comm;
-		printf("For f=%f\n", current_f);
+		printf("\e[1;34mFor f=%.10f\e[0m\n", current_f);
 
 		// calculate an upper bound using greedy algorithm
-		bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server);
+		double dualvalues[opt_atu];
+		lp_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues);
 		reset_opt_data_copies(opt_data, opt_atu);
-		lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, NULL, current_f, &aux_makespan, &aux_comm);
+		lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues, current_f, &aux_makespan, &aux_comm);
 
 		double aux = fabs(current_f * aux_makespan - aux_comm);
 		if (aux < smaller_diff) {
@@ -151,9 +160,35 @@ int main(int argc, char *argv[]) {
 			most_similar_f = current_f;
 		}
 
-		current_f = round(aux_comm/aux_makespan*1000.0)/1000.0;
+		double new_f = round(aux_comm/aux_makespan*100000000.0)/100000000.0;
+		if (fabs(new_f-current_f) < 0.0001)
+			break;
+		else
+			current_f = new_f;
 	}
-	printf("f should be: %f\n", most_similar_f);
+	printf("f should be: %.10f\n", most_similar_f);
+	#endif
+
+	#ifdef LAGRANGE
+	// calculate an upper bound using greedy algorithm
+	double aux_makespan, aux_comm;
+
+	struct timespec cs;
+	clock_gettime(CLOCK_REALTIME, &cs);
+
+	//bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server);
+	double dualvalues[opt_atu];
+	lp_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues);
+
+	reset_opt_data_copies(opt_data, opt_atu);
+	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues, 0, &aux_makespan, &aux_comm);
+
+	struct timespec cf;
+	clock_gettime(CLOCK_REALTIME, &cf);
+	double runtime = runtime_diff_ms(&cs, &cf);
+	printf("runtime: %.2f\n", runtime);
+
+	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, true);
 	#endif
 
 	#ifdef MIP

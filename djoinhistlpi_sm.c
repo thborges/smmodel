@@ -20,6 +20,7 @@
 #include <glpk_cplex_wrap.h>
 #else
 #include <ilcplex/cplex.h>
+#include <ilcplex/cplexdistmip.h>
 #endif
 
 #define LP_WITH_NAMED_VARS
@@ -41,6 +42,9 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	int status = 0;
 
 	env = CPXopenCPLEX(&status);
+
+	//CPXreadcopyvmconfig(env, "distconfig.vmc");
+
 	lp = CPXcreateprob(env, &status, "dgeo");
 
 	CPXchgobjsen(env, lp, CPX_MIN);
@@ -162,9 +166,9 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	// status = CPXsetintparam(env, 1067, 1);
 
 	// stop at mip gap
-	status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.005);
+	//status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0001);
 	status = CPXsetdblparam (env, CPX_PARAM_WORKMEM, 60*1024.0); // at most 1G RAM
-	status = CPXsetintparam (env, CPX_PARAM_NODEFILEIND, 2); // write node files to disk, uncompressed
+	status = CPXsetintparam (env, CPX_PARAM_NODEFILEIND, 3); // write node files to disk, compressed
 	status = CPXsetintparam (env, CPX_PARAM_VARSEL, 2); // use strong branching
 	status = CPXsetintparam (env, CPX_PARAM_MIPEMPHASIS, 3); // Emphasize best bound
 
@@ -183,6 +187,7 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 
 	// optimize
 	status = CPXmipopt(env, lp);
+	//status = CPXdistmipopt(env, lp);
 
 	// get best objective bound
 	double best_objval;
@@ -227,6 +232,8 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 			map[cell][server] = x[index] > 0 ? 1 : 0;
 		}
 	}
+
+	print_instance_and_solution_fo_file(opt_data, opt_atu, servers, map);
 
 	for(int cell = 0; cell < opt_atu; cell++) {
 		int used_server = 0;

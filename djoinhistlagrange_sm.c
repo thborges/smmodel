@@ -189,7 +189,7 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		md.u[ij] = 0;
 		/*if (dualvalues) {
 			md.u[ij] = - dualvalues[ij];
-			printf("dual %i %f\n", ij, dualvalues[ij]);
+			//printf("dual %i %f\n", ij, dualvalues[ij]);
 		}*/
 		
 		//printf("(%f\t%f)\t", opt_data[ij].pnts, min);
@@ -207,7 +207,9 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		best_x_ijk[cell->place-1][ij] = 1;
 	}
 
-	const int stop = 10000;
+//	const int stop = 10000;
+	const int stop = 3000;
+	int stop_time = 0;
 	double lambda = 2.0;
 	double lambda_reduce = 2.0;
 	double tk;
@@ -264,12 +266,12 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 			sol_gap = gap;
 		}
 		if (stable_sol_gap > 30) {
-			//printf("Stable gap detected. Solution gap %f!\n", sol_gap);
-			if (sol_gap > 0.10) {
-				/*knapsack_atu *= (1.0+sol_gap);
+			printf("Stable gap detected. Solution gap %f!\n", sol_gap);
+			/*if (sol_gap > 0.10) {
+				knapsack_atu *= (1.0+sol_gap);
 				printf("Knapsack increased due high gap %f: %f\n", sol_gap, knapsack_atu);
-				lambda = 2.0;*/
-			}
+				lambda = 2.0;
+			}*/
 			stable_sol_gap = -1; // disable
 		}
 		
@@ -329,7 +331,7 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 				best_processed = processed;
 				zd_processed = Zdk;
 				memcpy(best_x_ijk, x_ijk, sizeof(int)*servers*pairs);
-				//printf("New feasible solution (UB): %'.0f, x0 %'f\n", NewZheur, heur_x0);
+				printf("New feasible solution (UB): %'.0f, x0 %'f\n", NewZheur, heur_x0);
 				Zheur = NewZheur;
 				memcpy(best_u, md.u, sizeof(double)*pairs);
 				memcpy(best_subgrad, subgrad, sizeof(double)*pairs);
@@ -367,16 +369,19 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		}
 
 		if (choosed != ' ' || k%100==0) {
-			fprintf(stderr, "\033[91m k=%4d, Zd: %'15.2f%c lamb: %5.4f, T[k]: %'15.4f, norm: %'10.2f, x0: %'10.0f np: %5d, dp: %5d v: %10.0f cp: %5d %c\r\033[0m", 
+			fprintf(stderr, "\033[91m k=%4d, Zd: %'15.2f%c lamb: %5.4f, T[k]: %'15.4f, norm: %'10.2f, x0: %'10.0f np: %5d, dp: %5d v: %10.0f cp: %5d %c\n\033[0m", 
 				k, Zdk, improved, lambda,
 				tk, norm, x0, 
 				not_processed, double_processed, knapsack_atu, processed, choosed);
 		}
 
 		// stop condition
-		if ((fabs(tk) <= 1e-3 && lambda < 1e-4) || norm < 1e-10) {
+		if (fabs(tk) <= 1e-3 || lambda < 1e-4 || norm < 1e-10) {
 			//printf("Exit. t[k] = %f, norm = %f\n", tk, norm);
-			break;
+			if (stop_time < 10)
+				stop_time++;
+			else
+				break;
 		}
 		
 		k++;
