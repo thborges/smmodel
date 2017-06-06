@@ -395,14 +395,9 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		printf("%f %f\n", best_u[ij], best_subgrad[ij]);
 	}*/
 
-	// round if needed
+	// best_x_ijk is a feasible solution
 	double final_mkspan, final_comm;
 	set_cell_place_from_partial_x(hr, servers, pairs, best_x_ijk, opt_data);
-	Zheur = get_sm_objective(hr, opt_data, pairs, md.f, md.g, servers, multiplier, NULL, NULL, &final_mkspan, &final_comm);
-	printf("Before LR rounding\nZ\tMkspan\tComm\n%.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
-	printf("Using solution with %d/%d correctly processed items\n", best_processed, pairs);
-
-	lp_optimize_hr_round_decreasing_low_comm(hr, servers, opt_data, pairs, best_x_ijk, agg_server, true, md.f, md.g);
 	Zheur = get_sm_objective(hr, opt_data, pairs, md.f, md.g, servers, multiplier, NULL, NULL, &final_mkspan, &final_comm);
 	printf("After LR rounding\nZ\tMkspan\tComm\n%.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
 

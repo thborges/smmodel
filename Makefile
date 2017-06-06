@@ -10,13 +10,14 @@ CFLAGS=-D_GNU_SOURCE -std=gnu11 -I$(CPLEX_INC)
 CFLAGS_OPT=-march=native -Ofast
 
 #LDFLAGS=$(CPLEX_LIB) -lm -fopenmp=libiomp5
-LDFLAGS=$(CPLEX_LIB) -lm 
+#LDFLAGS=$(CPLEX_LIB) -lm
+LDFLAGS=$(CPLEX_LIB) -lm -Ofast
 
 
 all: lagrange mip findf
 
 cpphash.o:
-	clang++ -c cpphash.cpp
+	clang++ $(CFLAGS_OPT) -c cpphash.cpp
 
 findf: *.c cpphash.o
 	rm -f main.o

@@ -250,7 +250,7 @@ void three_most_loaded_server(int servers, double server_load[servers], double v
 	indxs[0] = large;
 	indxs[1] = middle;
 	indxs[2] = smaller;
-	for(int s = 0; s < servers; s++) {
+	for(int s = 3; s < servers; s++) {
 		if (server_load[s] > values[0]) {
 			indxs[2] = indxs[1];
 			indxs[1] = indxs[0];
@@ -258,6 +258,14 @@ void three_most_loaded_server(int servers, double server_load[servers], double v
 			values[2] = values[1];
 			values[1] = values[0];
 			values[0] = server_load[s];
+		} else if (server_load[s] > values[1]) {
+			indxs[2] = indxs[1];
+			indxs[1] = s;
+			values[2] = values[1];
+			values[1] = server_load[s];
+		} else if (server_load[s] > values[2]) {
+			indxs[2] = s;
+			values[2] = server_load[s];
 		}
 	}
 }
