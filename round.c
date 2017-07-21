@@ -371,7 +371,7 @@ void improve_transformed_solution_exchange_pairs(int servers, optimization_data_
 	//printf("Exchanged %d, z decreased %f, Old x0 %f, new x0 %f\n", exchanged_pairs_cnt, total_cost_reduction, old_x0, x0);
 }
 
-void improve_transformed_solution(int servers, optimization_data_s *opt_data, int pairs, 
+double improve_transformed_solution(int servers, optimization_data_s *opt_data, int pairs, 
 	int x[servers][pairs], double f, double g) {
 
 	// calc server makespan
@@ -405,7 +405,8 @@ void improve_transformed_solution(int servers, optimization_data_s *opt_data, in
 		}
 	}
 	old_x0 = x0;
-	
+
+	double zimprovement = 0;
 	for(int p = 0; p < pairs; p++) {
 		int minor = -1;
 		double minor_cost = 0;
@@ -428,6 +429,8 @@ void improve_transformed_solution(int servers, optimization_data_s *opt_data, in
 		}
 
 		if (minor != -1) {
+			zimprovement -= minor_cost; // negative
+
 			x[minor][p] = 1;
 			x[where[p]][p] = 0;
 			server_mkspan[minor] += opt_data[p].pnts;
@@ -446,6 +449,7 @@ void improve_transformed_solution(int servers, optimization_data_s *opt_data, in
 			}
 		}
 	}
+	return zimprovement;
 	//printf("Old x0 %f, new x0 %f\n", old_x0, x0);
 }
 
@@ -470,7 +474,7 @@ void lp_optimize_hr_round_decreasing_low_comm(dataset_histogram *hr, int servers
 		remove_double_processed_items(servers, opt_data, opt_atu, x, f, g);
 		schedule_non_assigned_items(servers, opt_data, opt_atu, x, f, g); 
 		improve_transformed_solution(servers, opt_data, opt_atu, x, f, g);
-		improve_transformed_solution_exchange_pairs(servers, opt_data, opt_atu, x, f, g);
+		//improve_transformed_solution_exchange_pairs(servers, opt_data, opt_atu, x, f, g);
 	}
 
 	for(int cell = 0; cell < opt_atu; cell++) {

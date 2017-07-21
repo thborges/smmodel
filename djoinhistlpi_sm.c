@@ -135,6 +135,21 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	status = CPXaddrows(env, lp, 0, mks_rows, mks_rowsnz, mks_rhs, 
 		mks_sense, mks_matbeg, mks_matind, mks_matval, NULL, NULL);
 
+	aux = getenv("FORCE_MS");
+	if (aux) {
+		double ms = atof(aux);
+
+		// force makespan = fixmksp
+		double fixmksp = ms;
+		mks_matbeg[0] = 0;
+		mks_sense[0] = 'E';
+		mks_rhs[0] = fixmksp;
+		mks_matind[0] = cols-1;
+		mks_matval[0] = 1.0;
+		status = CPXaddrows(env, lp, 0, 1, 1, mks_rhs, mks_sense, mks_matbeg, 
+			mks_matind, mks_matval, NULL, NULL);
+		printf("\n*****\nMAKESPAN FORCED TO %f\n*****\n", ms);
+	}
 
 	// provide an initial solution
 	int mcnt = 1;
@@ -166,11 +181,13 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	// status = CPXsetintparam(env, 1067, 1);
 
 	// stop at mip gap
-	//status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0001);
+	status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0000001);
 	status = CPXsetdblparam (env, CPX_PARAM_WORKMEM, 60*1024.0); // at most 1G RAM
 	status = CPXsetintparam (env, CPX_PARAM_NODEFILEIND, 3); // write node files to disk, compressed
 	status = CPXsetintparam (env, CPX_PARAM_VARSEL, 2); // use strong branching
 	status = CPXsetintparam (env, CPX_PARAM_MIPEMPHASIS, 3); // Emphasize best bound
+	//status = CPXsetintparam (env, CPX_PARAM_MIPEMPHASIS, 1); // Emphasize feasibility
+	//status = CPXsetintparam (env, CPX_PARAM_MIPEMPHASIS, 4); // Emphasize hidden feasibility
 
 	// cuts
 	status = CPXsetintparam (env, CPX_PARAM_CLIQUES, 3);
@@ -184,6 +201,12 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	status = CPXsetintparam (env, CPX_PARAM_MIRCUTS, 2);
 	status = CPXsetintparam (env, CPX_PARAM_MCFCUTS, 2);
 	status = CPXsetintparam (env, CPX_PARAM_ZEROHALFCUTS, 2);
+
+	// enable the search for alternative solutions
+	/*status = CPXsetintparam (env, CPX_PARAM_PREIND, 0); // disable presolve
+	status = CPXsetdblparam (env, CPX_PARAM_CUTSFACTOR, (double)1.0); // disable all cuts
+	status = CPXsetintparam (env, CPX_PARAM_VARSEL, 1); // branch on var with max infeasibility
+	*/
 
 	// optimize
 	status = CPXmipopt(env, lp);
@@ -229,7 +252,7 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	for(int cell = 0; cell < opt_atu; cell++) {
 		for(int server = 1; server <= servers; server++) {
 			int index = cell*servers + server-1;
-			map[cell][server] = x[index] > 0 ? 1 : 0;
+			map[cell][server] = round(x[index]);
 		}
 	}
 

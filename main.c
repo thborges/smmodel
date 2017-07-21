@@ -170,6 +170,22 @@ int main(int argc, char *argv[]) {
 	#endif
 
 	#ifdef LAGRANGE
+	// transform the instance to PA
+	double wjs[] = {4, 7, 8, 6, 4, 6, 7, 9, 8, 2, 3, 1, 9, 8, 4, 7, 1, 7, 1, 1, 2, 8, 9, 8, 3, 1, 3, 2, 8, 6, 8, 3, 7, 9, 1, 2, 4, 7, 2, 9, 8, 9, 2, 8, 5, 8, 8, 5, 6, 1, 4, 7, 2, 8, 7, 4, 3, 1, 7, 9, 6, 9, 3, 1, 7, 6, 7, 2, 4};
+//	double wjs[] = {4,2,3,1,4,1,2,3,5,2,3,3,1,5,4,2,1,2,1,2,2,4,3,5,3,1,3,2,3,1,5,3,3,4,5,3,4,2,2,3,5,4,2,5,5,3,4,5,1,1,4,2,2,1,2,4,3,1,2,2,1,1,5,3,2,1,2,5,4};
+
+	double multiplier = 1000.0;
+	for(int j=0; j < opt_atu; j++) {
+		opt_data[j].pnts = round(opt_data[j].pnts / multiplier);
+		opt_data[j].pnts = wjs[j];
+		//opt_data[j].pnts = random()%5+1;
+		//printf("%.0f,", opt_data[j].pnts);
+		for(int i=0; i < servers; i++) {
+			opt_data[j].comm[i+1] = round(opt_data[j].comm[i+1] / multiplier);
+			if (opt_data[j].comm[i+1] < 10000)
+				opt_data[j].comm[i+1] *= 2;
+		}
+	}
 	// calculate an upper bound using greedy algorithm
 	double aux_makespan, aux_comm;
 
@@ -188,7 +204,7 @@ int main(int argc, char *argv[]) {
 	double runtime = runtime_diff_ms(&cs, &cf);
 	printf("runtime: %.2f\n", runtime);
 
-	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, true);
+	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, false);
 	#endif
 
 	#ifdef MIP

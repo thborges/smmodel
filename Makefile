@@ -29,6 +29,11 @@ lagrange: *.c cpphash.o
 	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DLAGRANGE -c *.c
 	clang++ *.o $(LDFLAGS) -lpthread -o lagrange
 
+lagrange2: *.c cpphash.o
+	rm -f main.o
+	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DLAGRANGE -c *.c
+	clang++ *.o $(LDFLAGS) -lpthread -o lagrange2
+
 mip: *.c cpphash.o
 	rm -f main.o
 	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DMIP -c *.c
