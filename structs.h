@@ -32,24 +32,31 @@
 #define g_new0(ptype, count) (ptype*)calloc(count, sizeof(ptype))
 #define g_renew(ptype, pointer, count) (ptype*)realloc(pointer, sizeof(ptype) * (count))
 
-
 struct Envelope { 
-	union {
+/*	union {
 		struct {
 			__m128d Min;
 			__m128d Max;
 		};
-		struct {
+		struct {*/
 			double MinX;
 			double MinY;
 			double MaxX;
 			double MaxY;
-		};
-	};
+/*		};
+	};*/
 };
 
-
 typedef struct Envelope Envelope;
+
+#define AVGL_HISTO_SIZE 4
+
+typedef struct {
+	unsigned short qtd_x;
+	float avg_x;
+	unsigned short qtd_y[AVGL_HISTO_SIZE];
+	float avg_y[AVGL_HISTO_SIZE];
+} avglength2d;
 
 typedef struct {
 	unsigned short x;
@@ -58,11 +65,12 @@ typedef struct {
 	double points;
 	unsigned place;
 	unsigned copies;
-	void *extra_data;
-	double avglength_x;
-	double avglength_y;
 	double objcount;
-	double prep_cost;
+	float prep_cost;
+	float areasum;
+	Envelope usedarea;
+	avglength2d len[AVGL_HISTO_SIZE];
+	void *extra_data;
 } histogram_cell;
 
 enum HistogramType {

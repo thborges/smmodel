@@ -7,11 +7,11 @@ CPLEX_LIB=/usr/local/lib/libcplex.a
 #CFLAGS=-fopenmp=libiomp5 -D_GNU_SOURCE -std=gnu11 -I$(CPLEX_INC)
 CFLAGS=-D_GNU_SOURCE -std=gnu11 -I$(CPLEX_INC)
 #CFLAGS_OPT=-O0 -ggdb
-CFLAGS_OPT=-march=native -Ofast
+CFLAGS_OPT= -ffast-math -march=native -Ofast
 
 #LDFLAGS=$(CPLEX_LIB) -lm -fopenmp=libiomp5
 #LDFLAGS=$(CPLEX_LIB) -lm
-LDFLAGS=$(CPLEX_LIB) -lm -Ofast
+LDFLAGS=$(CPLEX_LIB) -ffast-math -lm -Ofast
 
 
 all: lagrange mip findf

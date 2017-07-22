@@ -12,27 +12,34 @@
 #include <float.h>
 #include "structs.h"
 #include "cpphash.h"
+#include "utils.h"
+
+bool verbose;
 
 void lp_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_sever,
-	double dualvalues[opt_atu]);
+	double f, double dualvalues[opt_atu]);
 
-void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
-	int opt_atu, multiway_histogram_estimate *agg_server);
+void bs_optimize_hr(dataset_histogram *hr, int servers,
+	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_sever,
+	double f);
 
 void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
-	optimization_data_s *opt_data, int pairs, multiway_histogram_estimate *agg_server,
-	double dualvalues[pairs], double f, double *return_mkspan, double *return_comm);
+	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_sever,
+	double f, double dualvalues[opt_atu]);
 
 void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server,
-	bool only_root_node);
-
+	double f, bool only_root_node);
 
 void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estimate, 
 	int servers, optimization_data_s *opt_data, int pairs);
-void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers, 
-	int *mkspan, int *totalcomm);
+void multiway_totalize_estimate(multiway_histogram_estimate *estimate, int servers,
+	double *totalpnts, double *totalcomm, 
+	double *mkspan, double *max_comm,
+	double *stdev_mkspan, double *stdev_comm,
+	double *mkspan_gap);
+void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers);
 void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu);
 
 void histogram_set_data_grid(dataset *ds, dataset_histogram_persist *hp);
@@ -49,24 +56,35 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
-	FILE *f = fopen(argv[1], "r");
-	if (!f) {
+	// check if MW_VERBOSE is set
+	char *auxf = getenv("MW_VERBOSE");
+	if (auxf)
+		verbose = 1;
+
+	// check if MW_F or MW_F0... is set
+	auxf = getenv("MW_F");
+	double f = auxf ? atof(auxf) : 1;
+	printf("Tradeoff f: %f\n",  f);
+
+	// open instance
+	FILE *finst = fopen(argv[1], "r");
+	if (!finst) {
 		printf("Error opening %s\n", argv[1]);
 		exit(1);
 	}
 
 	int opt_atu, servers;
-	fread(&opt_atu, sizeof(int), 1, f);
-	fread(&servers, sizeof(int), 1, f);
+	fread(&opt_atu, sizeof(int), 1, finst);
+	fread(&servers, sizeof(int), 1, finst);
 
 	dataset ds;
 	dataset_histogram *hr = &ds.metadata.hist;
-	fread(hr, sizeof(dataset_histogram), 1, f);
+	fread(hr, sizeof(dataset_histogram), 1, finst);
 
 	int size;
-	fread(&size, sizeof(int), 1, f);
+	fread(&size, sizeof(int), 1, finst);
 	char hdata[size];
-	fread(hdata, size, 1, f);
+	fread(hdata, size, 1, finst);
 
 	dataset_histogram_persist *hp = (dataset_histogram_persist*)hdata;
 	// code from dataset_set_histogram
@@ -78,21 +96,21 @@ int main(int argc, char *argv[]) {
 	CppMap *map = map_create();
 
 	for(int i = 0; i < opt_atu; i++) {
-		fread(&opt_data[i], sizeof(optimization_data_s), 1, f);
+		fread(&opt_data[i], sizeof(optimization_data_s), 1, finst);
 		
 		opt_data[i].lcell = (histogram_cell*)malloc(sizeof(histogram_cell));
-		fread(opt_data[i].lcell, sizeof(histogram_cell), 1, f);
+		fread(opt_data[i].lcell, sizeof(histogram_cell), 1, finst);
 
 		opt_data[i].comm = (double*)malloc(sizeof(double)*(servers+1));
-		fread(opt_data[i].comm, sizeof(double), servers+1, f);
+		fread(opt_data[i].comm, sizeof(double), servers+1, finst);
 
 		opt_data[i].rcells = (right_opt_data*)malloc(sizeof(right_opt_data)*
 			opt_data[i].rcells_size);
 		for(int j = 0; j < opt_data[i].rcells_size; j++) {
-			fread(&opt_data[i].rcells[j], sizeof(right_opt_data), 1, f);
+			fread(&opt_data[i].rcells[j], sizeof(right_opt_data), 1, finst);
 
 			histogram_cell hc_aux;
-			fread(&hc_aux, sizeof(histogram_cell), 1, f);
+			fread(&hc_aux, sizeof(histogram_cell), 1, finst);
 
 			int id = GET_ROD_ID(&opt_data[i].rcells[j]);
 			void *hc = map_get(map, id);
@@ -107,7 +125,7 @@ int main(int argc, char *argv[]) {
 	map_destroy(map);
 
 	multiway_histogram_estimate agg_server[servers+1];
-	fread(agg_server, sizeof(multiway_histogram_estimate), servers+1, f);
+	fread(agg_server, sizeof(multiway_histogram_estimate), servers+1, finst);
 
 	// print optimization data
 	/*printf("pair\tpoints\tlcomm\trcells");
@@ -141,8 +159,7 @@ int main(int argc, char *argv[]) {
 	// code to find f
 	double smaller_diff = DBL_MAX;
 	double most_similar_f;
-	char *auxmksp = getenv("LP_MKSP");
-	double current_f = auxmksp ? atof(auxmksp) : servers;
+	double current_f = f;
 
 	for(int i = 0; i < 10; i++) {
 		double aux_makespan, aux_comm;
@@ -150,9 +167,9 @@ int main(int argc, char *argv[]) {
 
 		// calculate an upper bound using greedy algorithm
 		double dualvalues[opt_atu];
-		lp_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues);
+		lp_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, dualvalues);
 		reset_opt_data_copies(opt_data, opt_atu);
-		lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues, current_f, &aux_makespan, &aux_comm);
+		lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, current_f, dualvalues); //, &aux_makespan, &aux_comm);
 
 		double aux = fabs(current_f * aux_makespan - aux_comm);
 		if (aux < smaller_diff) {
@@ -169,15 +186,18 @@ int main(int argc, char *argv[]) {
 	printf("f should be: %.10f\n", most_similar_f);
 	#endif
 
+	struct timespec cs;
+	clock_gettime(CLOCK_REALTIME, &cs);
+
 	#ifdef LAGRANGE
 	// transform the instance to PA
-	double wjs[] = {4, 7, 8, 6, 4, 6, 7, 9, 8, 2, 3, 1, 9, 8, 4, 7, 1, 7, 1, 1, 2, 8, 9, 8, 3, 1, 3, 2, 8, 6, 8, 3, 7, 9, 1, 2, 4, 7, 2, 9, 8, 9, 2, 8, 5, 8, 8, 5, 6, 1, 4, 7, 2, 8, 7, 4, 3, 1, 7, 9, 6, 9, 3, 1, 7, 6, 7, 2, 4};
+/*	double wjs[] = {4, 7, 8, 6, 4, 6, 7, 9, 8, 2, 3, 1, 9, 8, 4, 7, 1, 7, 1, 1, 2, 8, 9, 8, 3, 1, 3, 2, 8, 6, 8, 3, 7, 9, 1, 2, 4, 7, 2, 9, 8, 9, 2, 8, 5, 8, 8, 5, 6, 1, 4, 7, 2, 8, 7, 4, 3, 1, 7, 9, 6, 9, 3, 1, 7, 6, 7, 2, 4};
 //	double wjs[] = {4,2,3,1,4,1,2,3,5,2,3,3,1,5,4,2,1,2,1,2,2,4,3,5,3,1,3,2,3,1,5,3,3,4,5,3,4,2,2,3,5,4,2,5,5,3,4,5,1,1,4,2,2,1,2,4,3,1,2,2,1,1,5,3,2,1,2,5,4};
 
 	double multiplier = 1000.0;
 	for(int j=0; j < opt_atu; j++) {
 		opt_data[j].pnts = round(opt_data[j].pnts / multiplier);
-		opt_data[j].pnts = wjs[j];
+		//opt_data[j].pnts = wjs[j];
 		//opt_data[j].pnts = random()%5+1;
 		//printf("%.0f,", opt_data[j].pnts);
 		for(int i=0; i < servers; i++) {
@@ -185,51 +205,47 @@ int main(int argc, char *argv[]) {
 			if (opt_data[j].comm[i+1] < 10000)
 				opt_data[j].comm[i+1] *= 2;
 		}
-	}
+	}*/
+
 	// calculate an upper bound using greedy algorithm
 	double aux_makespan, aux_comm;
 
-	struct timespec cs;
-	clock_gettime(CLOCK_REALTIME, &cs);
-
-	//bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server);
-	double dualvalues[opt_atu];
-	lp_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues);
+	double *dualvalues = NULL;
+	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f);
+//	double dualvalues[opt_atu];
+//	lp_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, dualvalues);
 
 	reset_opt_data_copies(opt_data, opt_atu);
-	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, dualvalues, 0, &aux_makespan, &aux_comm);
+	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, dualvalues);//, &aux_makespan, &aux_comm);
+
+//	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, true);
+	#endif
+
+	#ifdef MIP
+	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, false);
+	#endif
 
 	struct timespec cf;
 	clock_gettime(CLOCK_REALTIME, &cf);
 	double runtime = runtime_diff_ms(&cs, &cf);
 	printf("runtime: %.2f\n", runtime);
 
-	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, false);
-	#endif
-
-	#ifdef MIP
-	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, false);
-	#endif
-
 	// print the summary 
-	//printf("\n\nSummary:\n");
 	multiway_histogram_estimate estimate[servers];
 	memset(estimate, 0, sizeof estimate);
 
 	totalize_estimate(hr, estimate, servers, opt_data, opt_atu);
-	int makespan, totalcomm;
-	histogram_print_estimate("server", estimate, servers, &makespan, &totalcomm);
-
-    char *aux = getenv("LP_COMM");
-    double g = aux ? atof(aux) : 1.0;
-    aux = getenv("LP_MKSP");
-    double fm = aux ? atof(aux) : servers;
+	if (verbose)
+		histogram_print_estimate("server", estimate, servers);
 
 	printf("\nValues for obj, with costs observing FM rules\n");
-	printf("Obj: %.0f, Makespan: %d, Comm: %d\n\n",
-		fm * makespan + g * totalcomm, makespan, totalcomm);
+	double totalcomm, mksp, stdevmksp;
+	multiway_totalize_estimate(estimate, servers-1, NULL, &totalcomm, 
+		&mksp, NULL, &stdevmksp, NULL, NULL);
+	printf("FM %s\t%d\t%d\t%12.0f\t%12.0f\t%12.0f\t%10.2f\n", "", opt_atu, servers, 
+		mksp, totalcomm, stdevmksp, runtime);
 
-	fclose(f);
+	fclose(finst);
 }
 
 int compare_right_opt_data(const void* x, const void*y) {
@@ -314,8 +330,7 @@ void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estim
 };
 
 
-void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers, 
-	int *mkspan, int *totalcomm) {
+void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate, int servers) {
 
 	int to_pnts = 0, io_pnts = 0;
 	//printf("%6s   Makespan       Comm\n", name);
@@ -341,11 +356,6 @@ void histogram_print_estimate(char *name, multiway_histogram_estimate *estimate,
 	//printf("total  %10d %10d\n", to_pnts, io_pnts);
 	//printf("max    %10d %10d\n", max_to_pnts, max_io_pnts);
 	//printf("min    %10d %10d\n", min_to_pnts, min_io_pnts);
-
-	if (mkspan)
-		*mkspan = max_to_pnts;
-	if (totalcomm)
-		*totalcomm = io_pnts;
 }
 
 void reset_opt_data_copies(optimization_data_s *opt_data, int opt_atu) {
@@ -411,5 +421,49 @@ void histogram_set_data_grid(dataset *ds, dataset_histogram_persist *hp) {
 histogram_cell *histogram_get_cell(dataset_histogram *dh, unsigned short x, unsigned short y) {
 	grid_histogram_data *ghd = (grid_histogram_data*)dh->extra_data;
 	return GET_GRID_HISTOGRAM_CELL(ghd, x, y);
+}
+
+double get_multiway_estimate_to_pnts(const void *data, const int n) {
+	return ((multiway_histogram_estimate*)data)[n].to_pnts;
+}
+
+double get_multiway_estimate_io_pnts(const void *data, const int n) {
+	return ((multiway_histogram_estimate*)data)[n].io_pnts;
+}
+
+void multiway_totalize_estimate(multiway_histogram_estimate *estimate, int servers,
+	double *totalpnts, double *totalcomm, 
+	double *mkspan, double *max_comm,
+	double *stdev_mkspan, double *stdev_comm,
+	double *mkspan_gap) {
+
+	double to_pnts = 0, io_pnts = 0;
+    double max_to_pnts = estimate[1].to_pnts;
+    double max_io_pnts = estimate[1].io_pnts;
+	for(int s = 1; s <= servers; s++) {
+		to_pnts += estimate[s].to_pnts;
+		io_pnts += estimate[s].io_pnts;
+        if (max_to_pnts < estimate[s].to_pnts)
+            max_to_pnts = estimate[s].to_pnts;
+        if (max_io_pnts < estimate[s].io_pnts)
+            max_io_pnts = estimate[s].io_pnts;
+	}
+
+	if (totalpnts)
+		*totalpnts = to_pnts;
+	if (totalcomm)
+		*totalcomm = io_pnts;
+	if (mkspan)
+		*mkspan = max_to_pnts;
+	if (max_comm)
+		*max_comm = max_io_pnts;
+	if (stdev_mkspan)
+		*stdev_mkspan = stdevd_ex(estimate, 1, servers+1, get_multiway_estimate_to_pnts);
+	if (stdev_comm)
+		*stdev_comm = stdevd_ex(estimate, 1, servers+1, get_multiway_estimate_io_pnts);
+	if (mkspan_gap) {
+		double min_mksp = (to_pnts / servers);
+		*mkspan_gap = (max_to_pnts - min_mksp) / min_mksp * 100;
+	}
 }
 

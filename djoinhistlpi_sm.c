@@ -1,17 +1,9 @@
 
-#ifdef __MACH__
-//#include <config.h>
-#endif
-
 #include <stdlib.h>
 #include <glibwrap.h>
-//#include <multiway-join.h>
-//#include <dataset.h>
-//#include <utils.h>
-#include "structs.h"
 #include <limits.h>
 #include <glpk.h>
-#include <round.h>
+#include "deps.h"
 #include "sm.h"
 
 #define ENABLE_CPLEX 1
@@ -28,13 +20,8 @@
 
 void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server,
-	bool only_root_node) {
+	double f, bool only_root_node) {
 
-	char *aux = getenv("LP_COMM");
-	double g = aux ? atof(aux) : 1.0;
-	aux = getenv("LP_MKSP");
-	double f = aux ? atof(aux) : servers;
-	printf("Tradeoff Comm: %f, Mkspan %f\n", g, f);
 	printf("\n============ Building CPLEX model =============\n");
 
 	CPXENVptr env = NULL;
@@ -65,7 +52,7 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 		for(int s = 1; s <= servers; s++) {
 			int catu = i*servers + s-1;
 			obj[catu] = opt_data[i].comm[s];
-			ub[catu] = g;
+			ub[catu] = 1;
 			ctype[catu] = 'I'; // integer
 
 			#ifdef LP_WITH_NAMED_VARS
@@ -135,21 +122,15 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	status = CPXaddrows(env, lp, 0, mks_rows, mks_rowsnz, mks_rhs, 
 		mks_sense, mks_matbeg, mks_matind, mks_matval, NULL, NULL);
 
-	aux = getenv("FORCE_MS");
-	if (aux) {
-		double ms = atof(aux);
-
-		// force makespan = fixmksp
-		double fixmksp = ms;
-		mks_matbeg[0] = 0;
-		mks_sense[0] = 'E';
-		mks_rhs[0] = fixmksp;
-		mks_matind[0] = cols-1;
-		mks_matval[0] = 1.0;
-		status = CPXaddrows(env, lp, 0, 1, 1, mks_rhs, mks_sense, mks_matbeg, 
-			mks_matind, mks_matval, NULL, NULL);
-		printf("\n*****\nMAKESPAN FORCED TO %f\n*****\n", ms);
-	}
+	// force makespan = fixmksp
+	/*double fixmksp = 32;
+	mks_matbeg[0] = 0;
+	mks_sense[0] = 'E';
+	mks_rhs[0] = fixmksp;
+	mks_matind[0] = cols-1;
+	mks_matval[0] = 1.0;
+	status = CPXaddrows(env, lp, 0, 1, 1, mks_rhs, mks_sense, mks_matbeg, 
+		mks_matind, mks_matval, NULL, NULL);*/
 
 	// provide an initial solution
 	int mcnt = 1;
@@ -178,19 +159,19 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	status = CPXsetintparam(env, 1035, CPX_ON);
 
 	// threads
-	// status = CPXsetintparam(env, 1067, 1);
+	status = CPXsetintparam(env, 1067, 10);
 
 	// stop at mip gap
-	status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0000001);
+	status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0005);
 	status = CPXsetdblparam (env, CPX_PARAM_WORKMEM, 60*1024.0); // at most 1G RAM
-	status = CPXsetintparam (env, CPX_PARAM_NODEFILEIND, 3); // write node files to disk, compressed
+	status = CPXsetintparam (env, CPX_PARAM_NODEFILEIND, 2); // write node files to disk, uncompressed
 	status = CPXsetintparam (env, CPX_PARAM_VARSEL, 2); // use strong branching
 	status = CPXsetintparam (env, CPX_PARAM_MIPEMPHASIS, 3); // Emphasize best bound
 	//status = CPXsetintparam (env, CPX_PARAM_MIPEMPHASIS, 1); // Emphasize feasibility
 	//status = CPXsetintparam (env, CPX_PARAM_MIPEMPHASIS, 4); // Emphasize hidden feasibility
 
 	// cuts
-	status = CPXsetintparam (env, CPX_PARAM_CLIQUES, 3);
+	/*status = CPXsetintparam (env, CPX_PARAM_CLIQUES, 3);
 	status = CPXsetintparam (env, CPX_PARAM_COVERS, 3);
 	status = CPXsetintparam (env, CPX_PARAM_DISJCUTS, 3);
 	status = CPXsetintparam (env, CPX_PARAM_FLOWCOVERS, 2);
@@ -200,7 +181,7 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	status = CPXsetintparam (env, CPX_PARAM_IMPLBD, 2);
 	status = CPXsetintparam (env, CPX_PARAM_MIRCUTS, 2);
 	status = CPXsetintparam (env, CPX_PARAM_MCFCUTS, 2);
-	status = CPXsetintparam (env, CPX_PARAM_ZEROHALFCUTS, 2);
+	status = CPXsetintparam (env, CPX_PARAM_ZEROHALFCUTS, 2);*/
 
 	// enable the search for alternative solutions
 	/*status = CPXsetintparam (env, CPX_PARAM_PREIND, 0); // disable presolve
@@ -249,6 +230,9 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	int map[opt_atu][servers+1];
 	memset(map, 0, sizeof map);
 
+	if (only_root_node)
+		goto free_problem;
+
 	for(int cell = 0; cell < opt_atu; cell++) {
 		for(int server = 1; server <= servers; server++) {
 			int index = cell*servers + server-1;
@@ -256,7 +240,7 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 		}
 	}
 
-	print_instance_and_solution_fo_file(opt_data, opt_atu, servers, map);
+	//print_instance_and_solution_fo_file(opt_data, opt_atu, servers, map);
 
 	for(int cell = 0; cell < opt_atu; cell++) {
 		int used_server = 0;
@@ -286,9 +270,10 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	}
 
 	double final_mkspan, final_comm;
-	double Zheur = get_sm_objective(hr, opt_data, opt_atu, f, g, servers, 1, NULL, NULL, &final_mkspan, &final_comm);
-	printf("LPI Z\tMkspan\tComm\n%.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
+	double Zheur = get_sm_objective(hr, opt_data, opt_atu, f, servers, 1, NULL, NULL, &final_mkspan, &final_comm);
+	printf("LPI Z\tMkspan\tComm\nSM_SMI %.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
 
+free_problem:
 	// free problem
 	#ifdef LP_WITH_NAMED_VARS
 	for(int catu = 0; catu < cols-1; catu++)

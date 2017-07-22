@@ -1,11 +1,9 @@
 
 #include <stdlib.h>
 #include <glibwrap.h>
-//#include <multiway-join.h>
-//#include <dataset.h>
-//#include <utils.h>
-#include "structs.h"
 #include <limits.h>
+#include "deps.h"
+#include "round.h"
 #include "sm.h"
 
 double trade_off;
@@ -107,6 +105,36 @@ int sort_optdata_decreasing(const void *x, const void *y) {
 }
 
 void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
+	int pairs, multiway_histogram_estimate *agg_server, double f) {
+
+	//TODO: fix djoinhist to pass the correct value
+	servers = servers - 1;
+
+	int x[servers][pairs];
+	memset(x, 0, sizeof x);
+
+	int where[pairs];
+	memset(where, -1, sizeof where);
+
+	double load[servers];
+	memset(load, 0, sizeof load);
+	
+	int unassigned_count = pairs;
+	int unassigned[pairs];
+	for(int i = 0; i < pairs; i++)
+		unassigned[i] = i;
+
+	schedule_non_assigned_items(unassigned_count, unassigned, servers, opt_data, load, pairs, where, x, f); 
+	improve_transformed_solution(servers, opt_data, pairs, load, where, x, f);
+	set_cell_place_from_partial_x(hr, servers, pairs, x, opt_data, where);
+
+	double final_mkspan, final_comm;
+	double Zheur = get_sm_objective(hr, opt_data, pairs, f, servers, 1, NULL, NULL, &final_mkspan, &final_comm);
+	printf("After GR\nZ\tMkspan\tComm\nSM_GR %.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
+
+}
+
+void bs_optimize_hr_old(dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
 	int opt_atu, multiway_histogram_estimate *agg_server) {
 
 	char *toff = getenv("BS_TRADEOFF");
@@ -150,7 +178,7 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt
 	}
 
 	double final_mkspan, final_comm;
-	double Zheur = get_sm_objective(hr, opt_data, opt_atu, servers, 1, servers, 1, NULL, NULL, &final_mkspan, &final_comm);
+	double Zheur = get_sm_objective(hr, opt_data, opt_atu, servers, servers, 1, NULL, NULL, &final_mkspan, &final_comm);
 	printf("After BS\nZ\tMkspan\tComm\n%.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
 
 }

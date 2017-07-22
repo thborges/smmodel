@@ -6,12 +6,12 @@
 #include <float.h>
 #include <glibwrap.h>
 #include <round.h>
-#include <structs.h>
+#include "deps.h"
+
+extern bool verbose;
 
 typedef struct {
-	double g;
 	double f;
-
 	double *u;
 } lagrange_model_data;
 
@@ -32,7 +32,7 @@ double lagrange_sm_get_opt_value(lagrange_model_data *md,
 		for(int s = 0; s < servers; s++) {
 			if (x_ijk[s][ij] > 0) {
 				makespan[s] += opt_data[ij].pnts;
-				commcost += md->g * opt_data[ij].comm[s+1] + md->u[ij];
+				commcost += opt_data[ij].comm[s+1] + md->u[ij];
 				count++;
 			}
 		}
@@ -54,7 +54,7 @@ double lagrange_sm_get_opt_value(lagrange_model_data *md,
 }
 
 double get_sm_objective(dataset_histogram *hr, optimization_data_s *opt_data, int opt_atu,
-	double f, double g, int servers, double multiplier, double *x0_ub, double *x0_lb, double *fmkspan, double *fcomm) {
+	double f, int servers, double multiplier, double *x0_ub, double *x0_lb, double *fmkspan, double *fcomm) {
 	double x[servers+1];
 	memset(x, 0, sizeof x);
 	double xm[servers+1];
@@ -94,7 +94,7 @@ double get_sm_objective(dataset_histogram *hr, optimization_data_s *opt_data, in
 	if (fmkspan)
 		*fmkspan = real_mkspan;
 
-	return f * real_mkspan + g * netcost;
+	return f * real_mkspan + netcost;
 }
 
 int int_decreasing_compare(const void* p1, const void* p2)
@@ -136,38 +136,34 @@ double find_knapsack_bestf_capacity(optimization_data_s *opt_data, int pairs, in
 
 void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int pairs, multiway_histogram_estimate *agg_server,
-	double dualvalues[pairs], double f, double *return_mkspan, double *return_comm) {
+	double f, double dualvalues[pairs]) {
 
 	lagrange_model_data md;
 	md.u = g_new(double, pairs);
+	md.f = f;
 
-	//printf("Pairs: %d\n", pairs);
-
-	char *aux = getenv("LP_COMM");
-	md.g = aux ? atof(aux) : 1.0;
-	aux = getenv("LP_MKSP");
-	md.f = aux ? atof(aux) : f;
-	//printf("Tradeoff g: %f, f: %f\n", md.g, md.f);
+	printf("Pairs: %d\n", pairs);
 
 	// find a multiplier to reduce knapsack capacity
+	double knapsack_bestf;
 	double multiplier = 1;
-	double knapsack_bestf = find_knapsack_bestf_capacity(opt_data, pairs, servers, 1);
+	/*knapsack_bestf = find_knapsack_bestf_capacity(opt_data, pairs, servers, 1);
 	double auxmax = knapsack_bestf;
 	while (auxmax > 1e6) {
 		multiplier /= 10;
 		auxmax /= 10;
 	}
 	multiplier = 1;
-	//printf("Knapsack bestf %f: multiplier %e\n", knapsack_bestf, multiplier);
+	printf("Knapsack bestf %f: multiplier %e\n", knapsack_bestf, multiplier);*/
 
 	double heur_x0;
 	double x0_lb;
-	double Zheur = get_sm_objective(hr, opt_data, pairs, md.f, md.g, servers, multiplier, &heur_x0, &x0_lb, NULL, NULL);
-	//printf("Heuristic Z*: %'.2f x0: %f x0_lb: %f\n", Zheur, heur_x0, x0_lb);
+	double Zheur = get_sm_objective(hr, opt_data, pairs, md.f, servers, multiplier, &heur_x0, &x0_lb, NULL, NULL);
+	printf("Heuristic Z*: %'.2f x0: %f x0_lb: %f\n", Zheur, heur_x0, x0_lb);
 
 	// 0-1 knapsack variables
-	double best_u[pairs];
-	double best_subgrad[pairs];
+	//double best_u[pairs];
+	//double best_subgrad[pairs];
 	int *weight = g_new(int, pairs);
 	int (*profit)[pairs] = malloc(servers * sizeof *profit);
 	int (*x_ijk)[pairs] = malloc(servers * sizeof *x_ijk);
@@ -176,30 +172,29 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 
 	for(int ij = 0; ij < pairs; ij++) {
 		// Initial values for md.u[]
-		double min = DBL_MAX;
+		/*double min = DBL_MAX;
 		for(int s = 0; s < servers; s++) {
 			if (min > opt_data[ij].comm[s+1])
 				min = opt_data[ij].comm[s+1];
-		}
+		}*/
 		//md.u[ij] = -((md.f/servers) * opt_data[ij].pnts + min);
 		//md.u[ij] = - min;
 		//md.u[ij] = ((md.f/servers) * opt_data[ij].pnts + min);
 		//md.u[ij] = min;
 		//md.u[ij] = - (x0_lb + min);
-		md.u[ij] = 0;
 		/*if (dualvalues) {
 			md.u[ij] = - dualvalues[ij];
-			//printf("dual %i %f\n", ij, dualvalues[ij]);
+			printf("dual %i %f\n", ij, dualvalues[ij]);
 		}*/
 		
 		//printf("(%f\t%f)\t", opt_data[ij].pnts, min);
 
-
+		md.u[ij] = 0;
 		weight[ij] = ceil(opt_data[ij].pnts * multiplier);
 
 		for(int s = 0; s < servers; s++) {
 			// Initial profit values
-			profit[s][ij] = - (/*md.f * opt_data[ij].pnts +*/ (md.g * opt_data[ij].comm[s+1]) + md.u[ij]);
+			profit[s][ij] = - ((opt_data[ij].comm[s+1]) + md.u[ij]);
 		}
 
 		// set the know solution, for the case no better solution is found
@@ -213,26 +208,27 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	double lambda = 2.0;
 	double lambda_reduce = 2.0;
 	double tk;
+	bool stable_tk = false;
 	double Zdk;
 	int notimproved = 0;
 	double best_zd = -DBL_MAX;
 	int zd_processed = 0;
 	int best_processed = 0;
+	double knapsack_reduce = 0.01; // 1%
 
 	int knapsack_lb = x0_lb;
 	knapsack_bestf = find_knapsack_bestf_capacity(opt_data, pairs, servers, multiplier);
 	double knapsack_gap = (knapsack_bestf - knapsack_lb) / knapsack_lb;
-	//printf("Knapsack lb, bestf, gap: %f, %f, %f\n", x0_lb, knapsack_bestf, knapsack_gap);
-	if (knapsack_gap < 0.01) {
+	printf("Knapsack lb, bestf, gap: %f, %f, %f\n", x0_lb, knapsack_bestf, knapsack_gap);
+	/*if (knapsack_gap < 0.01) {
 		lambda_reduce = 1.5;
 		knapsack_bestf *= 1.005;
-		//printf("Knapsack increased to %f, due knapsack_gap < 0.01\n", knapsack_bestf);
-	}
+		printf("Knapsack increased to %f, due knapsack_gap < 0.01\n", knapsack_bestf);
+	}*/
 
-	double knapsack_atu = knapsack_bestf;
+	//double knapsack_atu = knapsack_bestf;
+	double knapsack_atu = knapsack_bestf*1.3;//MAX(knapsack_bestf, knapsack_lb*2.0);
 
-	double sol_gap = 0;
-	int stable_sol_gap = 0;
 
 	int solutions = 0;
 	int decrease_lambda = 0;
@@ -248,32 +244,17 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		double x0;
 		Zdk = lagrange_sm_get_opt_value(&md, pairs, servers, x_ijk, opt_data, &x0);
 
-		if (Zdk >= Zheur) {
+		if (Zdk > Zheur) {
 			if (knapsack_atu > knapsack_lb) {
-				knapsack_atu = MAX(knapsack_lb, knapsack_atu*.99);
-				//printf("Knapsack reduced to %f. Zd %f, Zheur %f\n", knapsack_atu, Zdk, Zheur);
-				if (knapsack_atu > knapsack_lb)
-					continue;
+				knapsack_atu = MAX(knapsack_lb, knapsack_atu*(1.0-knapsack_reduce));
+				printf("Knapsack reduced %.2f%% to %f. Zd %f, Zheur %f\n", knapsack_reduce, knapsack_atu, Zdk, Zheur);
+				notimproved = 0;
+				best_zd = -DBL_MAX;
+				//knapsack_reduce *= 2;
+				continue;
 			}
 		}
-		
-		if (stable_sol_gap >= 0) {
-			double gap = fabs(Zdk - Zheur) / Zheur;
-			if (fabs(sol_gap - gap) < 0.01)
-				stable_sol_gap++;
-			else
-				stable_sol_gap = 0;
-			sol_gap = gap;
-		}
-		if (stable_sol_gap > 30) {
-			printf("Stable gap detected. Solution gap %f!\n", sol_gap);
-			/*if (sol_gap > 0.10) {
-				knapsack_atu *= (1.0+sol_gap);
-				printf("Knapsack increased due high gap %f: %f\n", sol_gap, knapsack_atu);
-				lambda = 2.0;
-			}*/
-			stable_sol_gap = -1; // disable
-		}
+		knapsack_reduce = 0.01; //1%
 		
 		// lambda set on first iteration
 		/*if (k == 0) {
@@ -303,7 +284,7 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 
 		// compute subgrad vector
 		double subgrad[pairs];
-		#pragma omp parallel for
+		//pragma omp parallel for
 		for(int ij = 0; ij < pairs; ij++) {
 			subgrad[ij] = 0.0;
 			for(int k = 0; k < servers; k++) {
@@ -324,8 +305,8 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 			solutions++;
 
 			// number of processed items improved. try to get a new upper bound
-			lp_optimize_hr_round_decreasing_low_comm(hr, servers, opt_data, pairs, x_ijk, agg_server, true, md.f, md.g);
-			double NewZheur = get_sm_objective(hr, opt_data, pairs, md.f, md.g, servers, multiplier, &heur_x0, NULL, NULL, NULL);
+			lp_optimize_hr_round_decreasing_low_comm(hr, servers, opt_data, pairs, x_ijk, agg_server, md.f, false, false);
+			double NewZheur = get_sm_objective(hr, opt_data, pairs, md.f, servers, multiplier, &heur_x0, NULL, NULL, NULL);
 			if (NewZheur < Zheur) {
 				choosed = 'x';
 				best_processed = processed;
@@ -333,8 +314,8 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 				memcpy(best_x_ijk, x_ijk, sizeof(int)*servers*pairs);
 				printf("New feasible solution (UB): %'.0f, x0 %'f\n", NewZheur, heur_x0);
 				Zheur = NewZheur;
-				memcpy(best_u, md.u, sizeof(double)*pairs);
-				memcpy(best_subgrad, subgrad, sizeof(double)*pairs);
+				//memcpy(best_u, md.u, sizeof(double)*pairs);
+				//memcpy(best_subgrad, subgrad, sizeof(double)*pairs);
 			}
 		}
 
@@ -356,19 +337,25 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		//double varobj = MAX(.04*Zdk, (1.01*Zheur)-Zdk);
 		//double varobj = 0.01 * (Zheur - Zdk);
 		double varobj = (Zheur - Zdk);
-		tk = (lambda * varobj) / norm;
+		double newtk = (lambda * varobj) / norm;
+		if (stable_tk || fabs(round(tk*1e4)) == fabs(round(newtk*1e4))) {
+			varobj = (1.01*Zheur)-Zdk;
+			tk = (lambda * varobj) / norm;
+			stable_tk = true;
+		} else
+			tk = newtk;
 
-		#pragma omp parallel for
+		//pragma omp parallel for
 		for(int ij = 0; ij < pairs; ij++) {
 			md.u[ij] = md.u[ij] + tk * subgrad[ij];
 
 			// update knapsack profits
 			for(int s = 0; s < servers; s++) {
-				profit[s][ij] = - (/*md.f * opt_data[ij].pnts +*/ (md.g * opt_data[ij].comm[s+1]) + md.u[ij]);
+				profit[s][ij] = - ((opt_data[ij].comm[s+1]) + md.u[ij]);
 			}
 		}
 
-		if (choosed != ' ' || k%100==0) {
+		if (verbose) {
 			fprintf(stderr, "\033[91m k=%4d, Zd: %'15.2f%c lamb: %5.4f, T[k]: %'15.4f, norm: %'10.2f, x0: %'10.0f np: %5d, dp: %5d v: %10.0f cp: %5d %c\n\033[0m", 
 				k, Zdk, improved, lambda,
 				tk, norm, x0, 
@@ -376,12 +363,14 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		}
 
 		// stop condition
+		if (norm == 0) break;
 		if (fabs(tk) <= 1e-3 || lambda < 1e-4 || norm < 1e-10) {
-			//printf("Exit. t[k] = %f, norm = %f\n", tk, norm);
 			if (stop_time < 10)
 				stop_time++;
-			else
+			else {
+				printf("Exit. t[k] = %f, norm = %f\n", tk, norm);
 				break;
+			}
 		}
 		
 		k++;
@@ -395,14 +384,15 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		printf("%f %f\n", best_u[ij], best_subgrad[ij]);
 	}*/
 
-	// best_x_ijk is a feasible solution
+	// best_x_ijk is a feasible solution. Set it on hr and print the best solution
 	double final_mkspan, final_comm;
-	set_cell_place_from_partial_x(hr, servers, pairs, best_x_ijk, opt_data);
-	Zheur = get_sm_objective(hr, opt_data, pairs, md.f, md.g, servers, multiplier, NULL, NULL, &final_mkspan, &final_comm);
-	printf("After LR rounding\nZ\tMkspan\tComm\n%.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
 
-	*return_mkspan = final_mkspan;
-	*return_comm = final_comm;
+	// improve exchange
+	lp_optimize_hr_round_decreasing_low_comm(hr, servers, opt_data, pairs, best_x_ijk, agg_server, md.f, false, true);
+	//set_cell_place_from_partial_x_nowh(hr, servers, pairs, best_x_ijk, opt_data);
+
+	Zheur = get_sm_objective(hr, opt_data, pairs, md.f, servers, multiplier, NULL, NULL, &final_mkspan, &final_comm);
+	printf("After LR rounding\nZ\tMkspan\tComm\nSM_LR %.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
 
 	/* print result for Prof. Les instances */
 	/*for(int s = 1; s <= servers; s++) {
