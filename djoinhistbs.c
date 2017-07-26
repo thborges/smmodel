@@ -125,7 +125,8 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt
 		unassigned[i] = i;
 
 	schedule_non_assigned_items(unassigned_count, unassigned, servers, opt_data, load, pairs, where, x, f); 
-	improve_transformed_solution(servers, opt_data, pairs, load, where, x, f);
+//	improve_transformed_solution(servers, opt_data, pairs, load, where, x, f);
+	improve_transformed_solution_fm(servers, opt_data, pairs, load, where, x, f);
 	set_cell_place_from_partial_x(hr, servers, pairs, x, opt_data, where);
 
 	double final_mkspan, final_comm;

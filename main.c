@@ -13,6 +13,7 @@
 #include "structs.h"
 #include "cpphash.h"
 #include "utils.h"
+#include "uthash.h"
 
 bool verbose;
 
@@ -31,6 +32,10 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server,
 	double f, bool only_root_node);
+
+void lpi_optimize_hr(dataset_histogram *hr, int servers,
+	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server,
+	double f, char *lname, char *rname, bool only_root_node);
 
 void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estimate, 
 	int servers, optimization_data_s *opt_data, int pairs);
@@ -65,6 +70,10 @@ int main(int argc, char *argv[]) {
 	auxf = getenv("MW_F");
 	double f = auxf ? atof(auxf) : 1;
 	printf("Tradeoff f: %f\n",  f);
+
+	char *qname = getenv("MW_QNAME");
+	if (!qname)
+		qname = "none";
 
 	// open instance
 	FILE *finst = fopen(argv[1], "r");
@@ -127,6 +136,9 @@ int main(int argc, char *argv[]) {
 	multiway_histogram_estimate agg_server[servers+1];
 	fread(agg_server, sizeof(multiway_histogram_estimate), servers+1, finst);
 
+	//TODO: disabled
+	memset(agg_server, 0, sizeof agg_server);
+
 	// print optimization data
 	/*printf("pair\tpoints\tlcomm\trcells");
 	for(int s = 1; s <= servers; s++)
@@ -188,6 +200,8 @@ int main(int argc, char *argv[]) {
 
 	struct timespec cs;
 	clock_gettime(CLOCK_REALTIME, &cs);
+	double totalcomm, mksp, stdevmksp;
+	multiway_histogram_estimate estimate[servers+1];
 
 	#ifdef LAGRANGE
 	// transform the instance to PA
@@ -225,25 +239,54 @@ int main(int argc, char *argv[]) {
 	lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, false);
 	#endif
 
+	#ifdef MIPFM
+	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f);
+//	reset_opt_data_copies(opt_data, opt_atu);
+//	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, NULL);//, &aux_makespan, &aux_comm);
+
+/*	totalize_estimate(hr, estimate, servers, opt_data, opt_atu);
+	multiway_totalize_estimate(estimate, servers, NULL, &totalcomm, 
+		&mksp, NULL, &stdevmksp, NULL, NULL);
+	printf("----------===================*********************\n");
+	printf("FM  pairs servers Z mksp comm stdevmk\n");
+	printf("FM %s\t%d\t%d\t%.2f\t%12.0f\t%12.0f\t%12.0f\t%10.2f\n", "", opt_atu, servers, 
+		mksp*f+totalcomm, mksp, totalcomm, stdevmksp, 0.0);
+
+	lpi_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, qname, "", true);
+*/
+	#endif
+
+	#ifdef GR
+	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f);
+	#endif
+
+	#ifdef LP
+	double dualvalues[opt_atu];
+	lp_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, dualvalues);
+	#endif
+
+	#ifdef LPI
+	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f);
+	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, NULL);
+	lpi_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f, qname, "", false);
+	#endif
+
 	struct timespec cf;
 	clock_gettime(CLOCK_REALTIME, &cf);
 	double runtime = runtime_diff_ms(&cs, &cf);
 	printf("runtime: %.2f\n", runtime);
 
 	// print the summary 
-	multiway_histogram_estimate estimate[servers];
-	memset(estimate, 0, sizeof estimate);
-
 	totalize_estimate(hr, estimate, servers, opt_data, opt_atu);
 	if (verbose)
 		histogram_print_estimate("server", estimate, servers);
 
 	printf("\nValues for obj, with costs observing FM rules\n");
-	double totalcomm, mksp, stdevmksp;
-	multiway_totalize_estimate(estimate, servers-1, NULL, &totalcomm, 
+	multiway_totalize_estimate(estimate, servers, NULL, &totalcomm, 
 		&mksp, NULL, &stdevmksp, NULL, NULL);
-	printf("FM %s\t%d\t%d\t%12.0f\t%12.0f\t%12.0f\t%10.2f\n", "", opt_atu, servers, 
-		mksp, totalcomm, stdevmksp, runtime);
+	printf("FM  pairs servers Z mksp comm stdevmk runtime\n");
+	printf("FM %s\t%d\t%d\t%.2f\t%12.2f\t%12.2f\t%12.2f\t%10.2f\n", "", opt_atu, servers, 
+		mksp*f+totalcomm,mksp, totalcomm, stdevmksp, runtime);
 
 	fclose(finst);
 }
@@ -266,31 +309,12 @@ void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estim
 	// clear the estimate structure to refill with the optimized schedule
 	memset(estimate, 0, sizeof(multiway_histogram_estimate)*(servers+1));
 
-	// print optimization data
-	/*printf("pair\tpoints\tlcomm\trcells");
-	for(int s = 1; s <= servers; s++)
-		printf("\t%d", s);
-	printf("\n");
-
-	for(int i = 0; i < pairs; i++) {
-		printf("%d\t%f\t%f", i, opt_data[i].pnts, opt_data[i].lcell->points);
-		for(int c = 0; c < opt_data[i].rcells_size; c++) {
-			printf("\trc.%d.%d", opt_data[i].rcells[c].xr, opt_data[i].rcells[c].yr);
-		}
-		printf("\n\t\tplace");
-		for(int c = 0; c < opt_data[i].rcells_size; c++) {
-			printf("\t%d", opt_data[i].rcells[c].cell->place);
-		}
-		printf("\n\t\tpoints");
-		for(int c = 0; c < opt_data[i].rcells_size; c++) {
-			printf("\t%f", opt_data[i].rcells[c].cell->points);
-		}
-		printf("\n");
-	}*/
-
-	int rcells_atu = 0;
-	int rcells_count = pairs; // at least!
-	right_opt_data **rcells = g_new(right_opt_data*, rcells_count);
+	typedef struct {
+		int key;
+		uint64_t place;
+		UT_hash_handle hh;
+	} used_rcells;
+	used_rcells *rcells = NULL;
 
 	for(int i = 0; i < pairs; i++) {
 		// to_pnts
@@ -303,30 +327,32 @@ void totalize_estimate(dataset_histogram *hr, multiway_histogram_estimate *estim
 
 		// rcell's
 		for(int c = 0; c < opt_data[i].rcells_size; c++) {
-			rcells[rcells_atu] = &opt_data[i].rcells[c];
+			if (opt_data[i].rcells[c].cell->place != resultcell->place) {
+				right_opt_data *rcell = &opt_data[i].rcells[c];
 
-			rcells_atu++;
-			if (rcells_atu >= rcells_count) {
-				rcells_count *= 2;
-				rcells = g_renew(right_opt_data*, rcells, rcells_count);
+				int rid = rcell->xr + (rcell->yr<<16);
+				used_rcells *r;
+				HASH_FIND_INT(rcells, &rid, r);
+				if (r == NULL) {
+					r = g_new(used_rcells, 1);
+					r->key = rid;
+					r->place = 0;
+					SET_IN_PLACE64(r->place, resultcell->place);
+					HASH_ADD_INT(rcells, key, r);
+					estimate[resultcell->place].io_pnts += rcell->cell->points;
+				} else if (!IS_IN_PLACE(r->place, resultcell->place)) {
+					SET_IN_PLACE64(r->place, resultcell->place);
+					estimate[resultcell->place].io_pnts += rcell->cell->points;
+				}
 			}
 		}
 	}
 
-	qsort(rcells, rcells_atu, sizeof(right_opt_data*), compare_right_opt_data);
-	
-	histogram_cell *last_cell = NULL;
-	for(int i=0; i < rcells_atu; i++) {
-		if (last_cell != rcells[i]->cell) {
-			for(int s = 1; s <= servers; s++) {
-				if (rcells[i]->cell->place != s && IS_IN_PLACE(rcells[i]->cell->copies, s))
-					estimate[s].io_pnts += rcells[i]->cell->points;
-			}
-			last_cell = rcells[i]->cell;
-		}
+	used_rcells *current, *tmp;
+	HASH_ITER(hh, rcells, current, tmp) {
+	    HASH_DEL(rcells, current);
+    	g_free(current);
 	}
-
-	g_free(rcells);
 };
 
 

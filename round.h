@@ -25,8 +25,11 @@ void schedule_non_assigned_items(int rem_count, int remaining[rem_count], int se
 void improve_transformed_solution(int servers, optimization_data_s *opt_data, int pairs, 
 	double load[servers], int where[pairs], int x[servers][pairs], double f);
 
+void improve_transformed_solution_fm(int servers, optimization_data_s *opt_data, int pairs, 
+	double load[servers], int where[pairs], int x[servers][pairs], double f);
+
 void improve_transformed_solution_exchange_pairs(int servers, optimization_data_s *opt_data, int pairs, 
-	int x[servers][pairs], double f);
+	double load[servers], int where[pairs], int x[servers][pairs], double f);
 
 #endif
 

@@ -11,10 +11,10 @@ CFLAGS_OPT= -ffast-math -march=native -Ofast
 
 #LDFLAGS=$(CPLEX_LIB) -lm -fopenmp=libiomp5
 #LDFLAGS=$(CPLEX_LIB) -lm
-LDFLAGS=$(CPLEX_LIB) -ffast-math -lm -Ofast
+LDFLAGS=$(CPLEX_LIB) -ffast-math -Ofast -march=native -lm -lglpk
 
 
-all: lagrange mip findf
+all: lagrange mip findf gr lp mipfm
 
 cpphash.o:
 	clang++ $(CFLAGS_OPT) -c cpphash.cpp
@@ -29,15 +29,40 @@ lagrange: *.c cpphash.o
 	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DLAGRANGE -c *.c
 	clang++ *.o $(LDFLAGS) -lpthread -o lagrange
 
-lagrange2: *.c cpphash.o
+gr: *.c cpphash.o
 	rm -f main.o
-	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DLAGRANGE -c *.c
-	clang++ *.o $(LDFLAGS) -lpthread -o lagrange2
+	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DGR -c *.c
+	clang++ *.o $(LDFLAGS) -lpthread -o gr
+
+lp: *.c cpphash.o
+	rm -f main.o
+	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DLP -c *.c
+	clang++ *.o $(LDFLAGS) -lpthread -o lp
+
+lpi: *.c cpphash.o
+	rm -f main.o
+	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DLPI -c *.c
+	clang++ *.o $(LDFLAGS) -lpthread -o lpi
 
 mip: *.c cpphash.o
 	rm -f main.o
 	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DMIP -c *.c
 	clang++ *.o $(LDFLAGS) -lpthread -o mip
+
+mipfm: *.c cpphash.o
+	rm -f main.o
+	clang $(CFLAGS) $(CFLAGS_OPT) -I. -DMIPFM -c *.c
+	clang++ *.o $(LDFLAGS) -lpthread -o mipfm
+
+mipfm2: *.c cpphash.o
+	rm -f main.o
+	clang $(CFLAGS) -O0 -ggdb -I. -DMIPFM -c *.c
+	clang++ *.o $(LDFLAGS) -lpthread -o mipfm2
+
+mipfm3: *.c cpphash.o
+	rm -f main.o
+	clang $(CFLAGS) -O0 -ggdb -I. -DMIPFM -c *.c
+	clang++ *.o $(LDFLAGS) -lpthread -o mipfm3
 
 clean:
 	rm -f mip lagrange

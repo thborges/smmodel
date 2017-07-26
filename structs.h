@@ -17,6 +17,7 @@
 
 #define GET_GRID_HISTOGRAM_CELL(h, x, y) (&((h)->hcells[(x)*(h)->yqtd + (y)]))
 #define SET_IN_PLACE(var, place) (var |= (1<<(place-1)))
+#define SET_IN_PLACE64(var, place) (var |= ((uint64_t)1<<(uint64_t)(place-1)))
 #define IS_IN_PLACE(var, place) (((var) >> (place-1)) & 1)
 #define GET_ROD_ID(cell) ((cell)->xr + ((cell)->yr << 16))
 

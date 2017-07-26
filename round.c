@@ -363,6 +363,167 @@ void improve_transformed_solution_exchange_pairs(int servers, optimization_data_
 	//printf("Exchanged %d, z decreased %f, Old x0 %f, new x0 %f\n", exchanged_pairs_cnt, total_cost_reduction, old_x0, x0);
 }
 
+void improve_transformed_solution_fm(int servers, optimization_data_s *opt_data, int pairs, 
+	double load[servers], int where[pairs], int x[servers][pairs], double f) {
+
+	typedef struct {
+		int key;
+		short usedc[64]; //TODO: This limit to max 64 servers
+		UT_hash_handle hh;
+	} used_rcells;
+	used_rcells *rcells = NULL;
+
+	// compute the comm cost
+	// lcell accounts only in lcell->place by design
+	for(int p = 0; p < pairs; p++) {
+		for(int c = 0; c < opt_data[p].rcells_size; c++) {
+			right_opt_data *rcell = &opt_data[p].rcells[c];
+			int rid = rcell->xr + (rcell->yr<<16);
+			used_rcells *r;
+			HASH_FIND_INT(rcells, &rid, r);
+			if (r == NULL) {
+				r = g_new0(used_rcells, 1);
+				r->key = rid;
+				HASH_ADD_INT(rcells, key, r);
+			}
+			r->usedc[where[p]]++;
+		}
+	}
+
+	double old_x0;
+	double x0, x1;
+
+	// identify the larger server load
+	int x0_s = load[0] > load[1] ? 0 : 1;
+	x1 = MIN(load[0], load[1]);
+	x0 = MAX(load[0], load[1]);
+	for(int s = 2; s < servers; s++) {
+		if (x0 < load[s]) {
+			x1 = x0;
+			x0 = load[s];
+			x0_s = s;
+		} else if (x1 < load[s]) {
+			x1 = load[s];
+		}
+	}
+	old_x0 = x0;
+	
+	for(int p = 0; p < pairs; p++) {
+		int minor = -1;
+		double minor_cost = 0;
+		for(int s = 0; s < servers; s++) {
+			if (s == where[p]) // move p to where it alread is
+				continue;
+			
+			double new_x0 = x0;
+			if (s == x0_s) // removing p from x0_s will reduce makespan
+				new_x0 -= MIN(x0-x1, opt_data[p].pnts);
+			new_x0 = MAX(new_x0, load[s] + opt_data[p].pnts);
+
+			double cost_increase = 0;
+			for(int c = 0; c < opt_data[p].rcells_size; c++) {
+				right_opt_data *rcell = &opt_data[p].rcells[c];
+				int rid = rcell->xr + (rcell->yr<<16);
+				used_rcells *r;
+				HASH_FIND_INT(rcells, &rid, r);
+				assert(r != NULL);
+				// remove c from where[p] will reduce costs?
+				if (r->usedc[where[p]] == 1) // only this pair put r there?
+					cost_increase -= ((rcell->cell->place-1) == where[p] ? 0.0 : rcell->cell->points);
+				// adding c to s will increase cost?
+				if (r->usedc[s] == 0) // increase if r are not in s
+					cost_increase += ((rcell->cell->place-1) == s ? 0.0 : rcell->cell->points);
+			}
+
+			// lcell
+			histogram_cell *lcell = opt_data[p].lcell;
+			cost_increase -= (lcell->place-1) == where[p] ? 0.0 : lcell->points;
+			cost_increase += (lcell->place-1) == s ? 0.0 : lcell->points;
+		
+			cost_increase += f * (new_x0 - x0);
+			if (cost_increase < minor_cost) {
+				minor_cost = cost_increase;
+				minor = s;
+			}
+		}
+
+		if (minor != -1) {
+			printf("Moving %d from %d to %d reduce cost: %f\n", p, where[p], minor, minor_cost);
+			int s = minor;
+			double new_x0 = x0;
+			if (s == x0_s) // removing p from x0_s will reduce makespan
+				new_x0 -= MIN(x0-x1, opt_data[p].pnts);
+			new_x0 = MAX(new_x0, load[s] + opt_data[p].pnts);
+			printf("\t makespan from %f to %f\n", x0, new_x0);
+
+			histogram_cell *lcell = opt_data[p].lcell;
+			printf("\t l cell actual %f new %f\n", 
+				(lcell->place-1) == where[p] ? 0.0 : lcell->points,
+				(lcell->place-1) == s ? 0.0 : lcell->points);
+	
+			for(int c = 0; c < opt_data[p].rcells_size; c++) {
+				right_opt_data *rcell = &opt_data[p].rcells[c];
+				int rid = rcell->xr + (rcell->yr<<16);
+				used_rcells *r;
+				HASH_FIND_INT(rcells, &rid, r);
+				assert(r != NULL);
+				// remove c from where[p] will reduce costs?
+				double actual = 0;
+				if (r->usedc[where[p]] == 1) // only this pair put r there?
+					actual = ((rcell->cell->place-1) == where[p] ? 0.0 : rcell->cell->points);
+				// adding c to s will increase cost?
+				double next = 0;
+				if (r->usedc[s] == 0) // increase if r are not in s
+					next = ((rcell->cell->place-1) == s ? 0.0 : rcell->cell->points);
+				printf("\t\trid: %d from %f to %f\n", rid, actual, next);
+			}
+	
+			x[minor][p] = 1;
+			x[where[p]][p] = 0;
+			load[minor] += opt_data[p].pnts;
+			load[where[p]] -= opt_data[p].pnts;
+
+			for(int c = 0; c < opt_data[p].rcells_size; c++) {
+				right_opt_data *rcell = &opt_data[p].rcells[c];
+				int rid = rcell->xr + (rcell->yr<<16);
+				used_rcells *r;
+				HASH_FIND_INT(rcells, &rid, r);
+				assert(r != NULL);
+				r->usedc[where[p]]--;
+				assert(r->usedc[where[p]] >= 0);
+				r->usedc[minor]++;
+			}
+
+			where[p] = minor;
+
+			x0_s = load[0] > load[1] ? 0 : 1;
+			x1 = MIN(load[0], load[1]);
+			x0 = MAX(load[0], load[1]);
+			for(int s = 2; s < servers; s++) {
+				if (x0 < load[s]) {
+					x1 = x0;
+					x0 = load[s];
+					x0_s = s;
+				} else if (x1 < load[s]) {
+					x1 = load[s];
+				}
+			}
+		}
+	}
+
+	used_rcells *current, *tmp;
+	HASH_ITER(hh, rcells, current, tmp) {
+	    HASH_DEL(rcells, current);
+    	g_free(current);
+	}
+
+	//printf("Old x0 %f, new x0 %f\n", old_x0, x0);
+	/*for(int p = 0; p < pairs; p++) {
+		assert(where[p] != -1);
+		assert(x[where[p]][p] == 1);
+	}*/
+}
+
 void improve_transformed_solution(int servers, optimization_data_s *opt_data, int pairs, 
 	double load[servers], int where[pairs], int x[servers][pairs], double f) {
 
