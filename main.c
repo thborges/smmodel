@@ -25,6 +25,13 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_sever,
 	double f);
 
+void bs_optimize_hr_old(dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
+	int opt_atu, multiway_histogram_estimate *agg_server, double trade_off);
+
+void bs_optimize_hr(dataset_histogram *hr, int servers,
+	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_sever,
+	double f);
+
 void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_sever,
 	double f, double dualvalues[opt_atu]);
@@ -258,6 +265,7 @@ int main(int argc, char *argv[]) {
 
 	#ifdef GR
 	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f);
+	//bs_optimize_hr_old(hr, servers+1, opt_data, opt_atu, agg_server, 0.001);
 	#endif
 
 	#ifdef LP

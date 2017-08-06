@@ -6,8 +6,6 @@
 #include "round.h"
 #include "sm.h"
 
-double trade_off;
-
 int choose_best_server_makespan(double *total_io, int servers, multiway_histogram_estimate *estimate) {
 	// This heuristic choose the server with minor load to
 	// process the cell. It works best when the
@@ -28,7 +26,7 @@ int choose_best_server_makespan(double *total_io, int servers, multiway_histogra
 }
 
 int choose_best_server(double *total_io, int servers, multiway_histogram_estimate *estimate,
-	multiway_histogram_estimate *agg_server) {
+	multiway_histogram_estimate *agg_server, double trade_off) {
 
 	// Choose the minor communication node
 	int choosed = 1;
@@ -136,13 +134,7 @@ void bs_optimize_hr(dataset_histogram *hr, int servers,	optimization_data_s *opt
 }
 
 void bs_optimize_hr_old(dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
-	int opt_atu, multiway_histogram_estimate *agg_server) {
-
-	char *toff = getenv("BS_TRADEOFF");
-	trade_off = toff ? atof(toff) : 0.0;
-	if (trade_off <= 0.0)
-		trade_off = 0.2;
-	//printf("Tradeoff: %f\n", trade_off);
+	int opt_atu, multiway_histogram_estimate *agg_server, double trade_off) {
 
 	multiway_histogram_estimate estimate[servers];
 	memset(estimate, 0, sizeof(multiway_histogram_estimate)*servers);
@@ -157,7 +149,7 @@ void bs_optimize_hr_old(dataset_histogram *hr, int servers,	optimization_data_s 
 		histogram_cell *resultcell = hr->get_cell(hr, xl, yl);
 
 		// choose the best server for the L cell
-		int choosed = choose_best_server(opt_data[c].comm, servers, estimate, agg_server);
+		int choosed = choose_best_server(opt_data[c].comm, servers, estimate, agg_server, trade_off);
 		resultcell->place = choosed;
 		SET_IN_PLACE(resultcell->copies, choosed);
 
