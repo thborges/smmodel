@@ -136,7 +136,9 @@ double find_knapsack_bestf_capacity(optimization_data_s *opt_data, int pairs, in
 
 void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int pairs, multiway_histogram_estimate *agg_server,
-	double f, double dualvalues[pairs]) {
+	double f, double dualvalues[pairs], 
+	double *ret_lw_mkspan, double *ret_lw_totalcomm,
+	double *ret_up_mkspan, double *ret_up_totalcomm) {
 
 	lagrange_model_data md;
 	md.u = g_new(double, pairs);
@@ -169,6 +171,9 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	int (*x_ijk)[pairs] = malloc(servers * sizeof *x_ijk);
 	int (*best_x_ijk)[pairs] = malloc(servers * sizeof *best_x_ijk);
 	memset(best_x_ijk, 0, sizeof(int)*servers*pairs);
+	int (*backup_x_ijk)[pairs] = malloc(servers * sizeof *backup_x_ijk);
+	int (*partial_x_ijk)[pairs] = malloc(servers * sizeof *partial_x_ijk);
+	memset(partial_x_ijk, 0, sizeof(int)*servers*pairs);
 
 	for(int ij = 0; ij < pairs; ij++) {
 		// Initial values for md.u[]
@@ -200,6 +205,7 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		// set the know solution, for the case no better solution is found
 		histogram_cell *cell = hr->get_cell(hr, opt_data[ij].xl, opt_data[ij].yl);
 		best_x_ijk[cell->place-1][ij] = 1;
+		partial_x_ijk[cell->place-1][ij] = 1;
 	}
 
 //	const int stop = 10000;
@@ -247,7 +253,8 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		if (Zdk > Zheur) {
 			if (knapsack_atu > knapsack_lb) {
 				knapsack_atu = MAX(knapsack_lb, knapsack_atu*(1.0-knapsack_reduce));
-				printf("Knapsack reduced %.2f%% to %f. Zd %f, Zheur %f\n", knapsack_reduce, knapsack_atu, Zdk, Zheur);
+				if (verbose)
+					printf("Knapsack reduced %.2f%% to %f. Zd %f, Zheur %f\n", knapsack_reduce, knapsack_atu, Zdk, Zheur);
 				notimproved = 0;
 				best_zd = -DBL_MAX;
 				//knapsack_reduce *= 2;
@@ -304,6 +311,9 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 			choosed = '!';
 			solutions++;
 
+			if (ret_lw_mkspan) {
+				memcpy(backup_x_ijk, x_ijk, sizeof(int)*servers*pairs);
+			}
 			// number of processed items improved. try to get a new upper bound
 			lp_optimize_hr_round_decreasing_low_comm(hr, servers, opt_data, pairs, x_ijk, agg_server, md.f, false, false);
 			double NewZheur = get_sm_objective(hr, opt_data, pairs, md.f, servers, multiplier, &heur_x0, NULL, NULL, NULL);
@@ -312,7 +322,9 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 				best_processed = processed;
 				zd_processed = Zdk;
 				memcpy(best_x_ijk, x_ijk, sizeof(int)*servers*pairs);
-				printf("New feasible solution (UB): %'.0f, x0 %'f\n", NewZheur, heur_x0);
+				memcpy(partial_x_ijk, backup_x_ijk, sizeof(int)*servers*pairs);
+				if (verbose)
+					printf("New feasible solution (UB): %'.0f, x0 %'f\n", NewZheur, heur_x0);
 				Zheur = NewZheur;
 				//memcpy(best_u, md.u, sizeof(double)*pairs);
 				//memcpy(best_subgrad, subgrad, sizeof(double)*pairs);
@@ -368,7 +380,8 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 			if (stop_time < 10)
 				stop_time++;
 			else {
-				printf("Exit. t[k] = %f, norm = %f\n", tk, norm);
+				if (verbose)
+					printf("Exit. t[k] = %f, norm = %f\n", tk, norm);
 				break;
 			}
 		}
@@ -376,7 +389,8 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 		k++;
 	}
 
-	printf("\nLast iteration k: %d\n", k);
+	if (verbose)
+		printf("\nLast iteration k: %d\n", k);
 
 	// debug md.u values	
 	/*printf("-------\n");
@@ -387,12 +401,25 @@ void lagrange_sm_optimize_hr(dataset_histogram *hr, int servers,
 	// best_x_ijk is a feasible solution. Set it on hr and print the best solution
 	double final_mkspan, final_comm;
 
+	// lower bound
+	set_cell_place_from_partial_x_nowh(hr, servers, pairs, partial_x_ijk, opt_data);
+	Zheur = get_sm_objective(hr, opt_data, pairs, md.f, servers, multiplier, NULL, NULL, &final_mkspan, &final_comm);
+	if (ret_lw_mkspan)
+		(*ret_lw_mkspan) = final_mkspan;
+	if (ret_lw_totalcomm)
+		(*ret_lw_totalcomm) = final_comm;
+
 	// improve exchange
 	lp_optimize_hr_round_decreasing_low_comm(hr, servers, opt_data, pairs, best_x_ijk, agg_server, md.f, false, true);
 	//set_cell_place_from_partial_x_nowh(hr, servers, pairs, best_x_ijk, opt_data);
 
 	Zheur = get_sm_objective(hr, opt_data, pairs, md.f, servers, multiplier, NULL, NULL, &final_mkspan, &final_comm);
 	printf("After LR rounding\nZ\tMkspan\tComm\nSM_LR %.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
+
+	if (ret_up_mkspan)
+		(*ret_up_mkspan) = final_mkspan;
+	if (ret_up_totalcomm)
+		(*ret_up_totalcomm) = final_comm;
 
 	/* print result for Prof. Les instances */
 	/*for(int s = 1; s <= servers; s++) {

@@ -611,7 +611,7 @@ void get_where_for_pair(int pairs, int servers, int x[servers][pairs], int where
 			where[cell] = used_server;
 		}
 		else {
-			printf("where[%d] = %d\n", cell, count);
+			//printf("where[%d] = %d\n", cell, count);
 			where[cell] = -1;
 		}
 	}
@@ -641,7 +641,7 @@ void set_cell_place_from_partial_x(dataset_histogram *hr, int servers, int pairs
 				SET_IN_PLACE(lc->copies, used_server);
 			}
 		} else {
-			printf("where %d set to %d.\n", cell, where[cell]);
+			//printf("where %d set to %d.\n", cell, where[cell]);
 			rcell->place = 0;
 		}
 	}

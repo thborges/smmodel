@@ -20,7 +20,7 @@
 
 void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	optimization_data_s *opt_data, int opt_atu, multiway_histogram_estimate *agg_server,
-	double f, bool only_root_node) {
+	double f, bool only_root_node, double *ret_mkspan, double *ret_totalcomm) {
 
 	printf("\n============ Building CPLEX model =============\n");
 
@@ -272,6 +272,11 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	double final_mkspan, final_comm;
 	double Zheur = get_sm_objective(hr, opt_data, opt_atu, f, servers, 1, NULL, NULL, &final_mkspan, &final_comm);
 	printf("LPI Z\tMkspan\tComm\nSM_SMI %.2f\t%.2f\t%.2f\n", Zheur, final_mkspan, final_comm);
+
+	if (ret_mkspan)
+		(*ret_mkspan) = final_mkspan;
+	if (ret_totalcomm)
+		(*ret_totalcomm) = final_comm;
 
 free_problem:
 	// free problem
