@@ -65,6 +65,7 @@ double runtime_diff_ms(struct timespec *start, struct timespec *end) {
 
 //const double scale = 100000;
 const double scale = 1.0;
+double lastf3 = 0;
 
 void exactpa(double f1, double yf1, double x01, double c1,
 		double f2, double yf2, double x02, double c2,
@@ -74,10 +75,29 @@ void exactpa(double f1, double yf1, double x01, double c1,
 	const char *empty = "                    ";
 
 	double f3 = (c2-c1)/(x01-x02);
+
+	printf("%.*sPA: Will refine for %f <= %f <= %f, yf1 %f, x01 %f, c1 %f, yf2 %f, x02 %f, c2 %f\n", 
+		level, empty, f1, f3, f2, yf1, x01, c1, yf2, x02, c2);
+
+	if (f3 < f1 || f3 > f2) {
+		printf("%.*sPA: breakpoint in another seg, skipping.\n", level, empty);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1, f2, yf2);
+		return;
+	}
+	//assert(f3 >= f1 && "f3 should be between f1 and f2");
+	//assert(f3 <= f2 && "f3 should be between f1 and f2");
+
+	if (round(f3*100) == round(lastf3*100)) {
+		printf("%.*sPA: same f3 given %f, skipping.\n", level, empty, f3);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1, f2, yf2);
+		return;
+	}
 	if (f3 <= 0) {
 		printf("%.*sPA: cannot continue due f3=%f\n", level, empty, f3);
 		return;
 	}
+
+	lastf3 = f3;
 
 	double mkspan, totalcomm;
 	reset_opt_data_copies(opt_data, opt_atu);
@@ -93,17 +113,17 @@ void exactpa(double f1, double yf1, double x01, double c1,
 	double zp3 = f3*x03+c3;
 
 	// y=ax+b
-	double a = (yf1-yf2)/(f1-f2);
-	double b = -a * f1 + yf1;
+	double a = (yf2-yf1)/(f2-f1);
+	double b = yf1 - a*f1;
 	double zp5 = f3*a + b;
 
 	printf("%.*sPA: zp4: %f, zp3: %f, zp5: %f\n", level, empty, zp4, zp3, zp5);
-	if (round(zp4*10) == round(zp3*10)) {
+	if (round(zp4) == round(zp3)) {
 		printf("%.*sPA: case b: found breakpoint f=%f\n", level, empty, f3);
 		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1, f3, zp3);
 		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f3, zp3, f2, yf2);
 	}
-	else if (round(zp3*10) == round(zp5*10)) {
+	else if (round(zp3) == round(zp5)) {
 		printf("%.*sPA: case c: no breakpoint\n", level, empty);
 		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1, f2, yf2);
 	}
@@ -114,55 +134,71 @@ void exactpa(double f1, double yf1, double x01, double c1,
 	}
 }
 
-void pa(double f1, double yf1u, double x01u, double c1u, double yf1l,
-		double f2, double yf2u, double x02u, double c2u, double yf2l,
+void pa(double f1, double yf1, double x01, double c1,
+		double f2, double yf2, double x02, double c2,
 		int level,
 		dataset_histogram *hr, int servers,	optimization_data_s *opt_data, 
 		int opt_atu, multiway_histogram_estimate *agg_server) {
 	const char *empty = "                    ";
 
-	if (level > 4) {
-		return;
-	}
+	double f3 = (c2-c1)/(x01-x02);
 
-	double f3 = (c2u-c1u)/(x01u-x02u);
-	if (f3 <= 0 || isinf(f3) || isnan(f3)) {
-		printf("%.*sPA: cannot continue due f3=%f\n", level, empty, f3);
-		printf("%.*sPA: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1u, f2, yf2u);
-		return;
-	}
-	if (!(f3 > f1 && f3 < f2) || !(f3 < f1 && f3 > f2)) {
-		printf("%.*sPA: f3 %f not between f1 %f and f2 %f. Will continue with f3=%f\n", 
-			level, empty, f3, f1, f2, (f1+f2)/2.0);
+	printf("%.*sPA: Will refine for %f <= %f <= %f, yf1 %f, x01 %f, c1 %f, yf2 %f, x02 %f, c2 %f\n", 
+		level, empty, f1, f3, f2, yf1, x01, c1, yf2, x02, c2);
+
+	if (f3 < f1 || f3 > f2) {
+		printf("%.*sPA: breakpoint in another seg, changing.\n", level, empty);
 		f3 = (f1+f2)/2.0;
 	}
+	//assert(f3 >= f1 && "f3 should be between f1 and f2");
+	//assert(f3 <= f2 && "f3 should be between f1 and f2");
 
-	printf("%.*sPA: f3=%f\n", level, empty, f3);
+	//find zf for p4
+	double zp4 = f3*x01+c1;
 
-	double lw_mkspan, lw_totalcomm, up_mkspan, up_totalcomm;
-	reset_opt_data_copies(opt_data, opt_atu);
-	bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f3);
-	reset_opt_data_copies(opt_data, opt_atu);
-	lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f3, NULL, 
-		&lw_mkspan, &lw_totalcomm, &up_mkspan, &up_totalcomm);
-	double x03l = lw_mkspan/scale;
-	double c3l = lw_totalcomm/scale;
-	double x03u = up_mkspan/scale;
-	double c3u = up_totalcomm/scale;
-	printf("%.*sPA: f3=%f f3: %fx + %f\n", level, empty, f3, x03u, c3u);
+	if (round(f3*1000) == round(lastf3*1000)) {
+		printf("%.*sPA: same f3 given %f, skipping.\n", level, empty, f3);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1, f3, zp4);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f3, zp4, f2, yf2);
+		return;
+	}
+	if (f3 <= 0) {
+		printf("%.*sPA: cannot continue due f3=%f\n", level, empty, f3);
+		return;
+	}
 
-	//lower bound
-	printf("%.*sPA: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1l, f3, f3*x03l+c3l);
-	printf("%.*sPA: Segment[(%f,%f),(%f,%f)]\n", level, empty, f2, yf2l, f3, f3*x03l+c3l);
-	//upper bound
-	printf("%.*sPA: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, f1*x01u+c1u, f3, f3*x03u+c3u);
-	printf("%.*sPA: Segment[(%f,%f),(%f,%f)]\n", level, empty, f2, f2*x02u+c2u, f3, f3*x03u+c3u);
+	lastf3 = f3;
 
-	pa(f1, yf1u, x01u, c1u, yf1l, f3, f3*x03u+c3u, x03u, c3u, f3*x03l+c3l, level+1, 
-		hr, servers, opt_data, opt_atu, agg_server);
-	pa(f3, f3*x03u+c3u, x03u, c3u, f3*x03l+c3l, f2, yf2u, x02u, c2u, yf2l, level+1, 
-		hr, servers, opt_data, opt_atu, agg_server);
+	double mkspan, totalcomm;
+    reset_opt_data_copies(opt_data, opt_atu);
+    bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f3);
+    reset_opt_data_copies(opt_data, opt_atu);
+    lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f3, NULL,
+        NULL, NULL, &mkspan, &totalcomm);
+	double x03 = mkspan/scale;
+	double c3 = totalcomm/scale;
 
+	printf("%.*sPA: f3=%f f1: %fx + %f\n", level, empty, f3, x03, c3);
+
+	//find zf for p3
+	double zp3 = f3*x03+c3;
+
+	printf("%.*sPA: zp4: %f, zp3: %f\n", level, empty, zp4, zp3);
+	if (round(zp3) > round(zp4)) {
+		printf("%.*sPA: case d: cannot continue\n", level, empty);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1, f3, zp4);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f3, zp4, f2, yf2);
+	}
+	else if (round(zp4) == round(zp3)) {
+		printf("%.*sPA: case b: found breakpoint f=%f\n", level, empty, f3);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f1, yf1, f3, zp3);
+		printf("%.*sGEOG: Segment[(%f,%f),(%f,%f)]\n", level, empty, f3, zp3, f2, yf2);
+	}
+	else {
+		printf("%.*sPA: case a: recursive call to refine uncertainty area\n", level, empty);
+		pa(f1, yf1, x01, c1, f3, zp3, x03, c3, level+1, hr, servers, opt_data, opt_atu, agg_server);
+		pa(f3, zp3, x03, c3, f2, yf2, x02, c2, level+1, hr, servers, opt_data, opt_atu, agg_server);
+	}
 }
 
 int main(int argc, char *argv[]) {
@@ -187,7 +223,7 @@ int main(int argc, char *argv[]) {
 		qname = "none";
 
 	// load instance. This is the M_pa or Q2_3_16M
-	const int m = 16;
+/*	const int m = 16;
 	const int n = 69;
 	int servers = m;
 	int opt_atu = n;
@@ -289,10 +325,10 @@ int main(int argc, char *argv[]) {
 		opt_data[a].rcells_size = 1;
 		opt_data[a].rcells = &ropt;
 	}
-	dataset_histogram *hr = &hra;
+	dataset_histogram *hr = &hra;*/
 
 	// open instance
-/*	FILE *finst = fopen(argv[1], "r");
+	FILE *finst = fopen(argv[1], "r");
 	if (!finst) {
 		printf("Error opening %s\n", argv[1]);
 		exit(1);
@@ -347,10 +383,10 @@ int main(int argc, char *argv[]) {
 		}
 	}	
 
-	map_destroy(map); */
+	map_destroy(map);
 
 	multiway_histogram_estimate agg_server[servers+1];
-	//fread(agg_server, sizeof(multiway_histogram_estimate), servers+1, finst);
+	fread(agg_server, sizeof(multiway_histogram_estimate), servers+1, finst);
 
 	//TODO: disabled
 	memset(agg_server, 0, sizeof agg_server);
@@ -376,12 +412,17 @@ int main(int argc, char *argv[]) {
 		}
 		printf("\n");
 	}*/
-	
+
+	// all integers	
+	for(int i = 0; i < opt_atu; i++) {
+		opt_data[i].pnts = round(opt_data[i].pnts);
+	}
+
 	print_instance_and_solution_fo_file(opt_data, opt_atu, servers, NULL);
 
 	reset_opt_data_copies(opt_data, opt_atu);
 
-	#ifdef EXACTPA
+	#if defined(EXACTPA) || defined(PA)
 	{
 		// find bounds of f
 		double f1 = 0;
@@ -399,69 +440,14 @@ int main(int argc, char *argv[]) {
 		double c2 = totalcomm/scale;
 		printf("PA: f2=%f f2: %fx + %f\n", f2, x02, c2);
 
+		#ifdef EXACTPA
 		exactpa(f1, f1*x01+c1, x01, c1, f2, f2*x02+c2, x02, c2,
 			1, hr, servers, opt_data, opt_atu, agg_server);
-	}
-	#endif
-
-	#ifdef PA
-	{
-		// find bounds of f
-		double f1 = 0;
-		double mkspan, totalcomm;
-		reset_opt_data_copies(opt_data, opt_atu);
-		lpi_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f1, false, &mkspan, &totalcomm);
-		double x01 = mkspan/scale;
-		double c1 = totalcomm/scale;
-		printf("PA: f1=%f f1: %fx + %f\n", f1, x01, c1);
-
-		double f2=100;
-		reset_opt_data_copies(opt_data, opt_atu);
-		bs_optimize_hr(hr, servers+1, opt_data, opt_atu, agg_server, f2);
-		double lw_mkspan, lw_totalcomm;
-		double up_mkspan, up_totalcomm;
-		reset_opt_data_copies(opt_data, opt_atu);
-		lagrange_sm_optimize_hr(hr, servers, opt_data, opt_atu, agg_server, f2, NULL, 
-			&lw_mkspan, &lw_totalcomm, &up_mkspan, &up_totalcomm);
-		printf("2: %f %f %f %f\n", lw_mkspan, lw_totalcomm, up_mkspan, up_totalcomm);
-		double x02l = lw_mkspan/scale;
-		double c2l = lw_totalcomm/scale;
-		double x02u = up_mkspan/scale;
-		double c2u = up_totalcomm/scale;
-		printf("PA: f2=%f f2: %fx + %f\n", f2, x02u, c2u);
-
-		double yf1 = f1*x01+c1;
-		double yf2 = f2*x02u+c2u;
-		pa(f1, yf1, x01, c1, yf1, f2, yf2, x02u, c2u, f2*x02l+c2l,
+		#endif
+		#ifdef PA
+		pa(f1, f1*x01+c1, x01, c1, f2, f2*x02+c2, x02, c2,
 			1, hr, servers, opt_data, opt_atu, agg_server);
- 
-
-/*		//find zf for p4
-		double zp4 = f3*x01+c1;
-
-		//find zf for p3
-		double zp3 = f3*x03+c3;
-
-		//equation from (f1,yf1)
-		double yf1 = f1*x01+c1;
-		double yf2 = f2*x02+c2;
-		// y=ax+b
-		double a = (yf1-yf2)/(f1-f2);
-		double b = -a * f1 + yf1;
-		double zp5 = f3*a + b;
-
-		printf("PA: zp4: %f, zp3: %f, zp5: %f\n", zp4, zp3, zp5);
-		if (round(zp4*10) == round(zp3*10))
-			printf("PA: case b: found breakpoint f=%f\n", f3);
-		else if (round(zp3*10) == round(zp5*10))
-			printf("PA: case c: no breakpoint\n");
-		else {
-			printf("PA: case a: recursive call to refine uncertainty area\n");
-			pa(f1, yf1, x01, c1, f3, zp3, x03, c3, 1, hr, servers, opt_data, opt_atu, agg_server);
-			pa(f3, zp3, x03, c3, f2, yf2, x02, c2, 1, hr, servers, opt_data, opt_atu, agg_server);
-		}*/
-		
-
+		#endif
 	}
 	#endif
 

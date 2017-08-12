@@ -1,8 +1,10 @@
 #CPLEX_INCL=/usr/local/include/ilcplex
 #CPLEX_LIB=/usr/local/lib/libcplex.a 
 #/usr/local/lib/libcplexdistmip.a -ldl
-CPLEX_INCL=/opt/local/include
-CPLEX_LIB=/opt/local/lib/libcplex.a
+#CPLEX_INCL=/opt/local/include
+#CPLEX_LIB=/opt/local/lib/libcplex.a
+CPLEX_INCL=/usr/local/include -I/usr/include/gdal
+CPLEX_LIB=/usr/lib/libcplex.a
 
 #CFLAGS=-fopenmp=libiomp5 -D_GNU_SOURCE -std=gnu11 -I$(CPLEX_INC)
 CFLAGS=-D_GNU_SOURCE -std=gnu11 -I$(CPLEX_INCL)

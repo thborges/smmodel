@@ -151,6 +151,33 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	}
 	status = CPXaddmipstarts(env, lp, mcnt, nzcnt, beg, varindices, values, NULL, NULL);
 
+	// read initial solution from file if it exists
+	char solfilename[200];
+	sprintf(solfilename, "mip_sm_last_sol_%d_%d.txt", servers, opt_atu);
+	FILE *fsol = fopen(solfilename, "r");
+	if (fsol) {
+		
+		actual = 0;
+		for(int i = 0; i < opt_atu; i++) {
+			for(int s = 1; s <= servers; s++) {
+				int ii, ss, v;
+				fscanf(fsol, "%d:%d=%d", &ii, &ss, &v);
+				char name[100];
+				sprintf(name, "map(%d,%d)", ii, ss);
+				int index;
+				status = CPXgetcolindex(env, lp, name, &index);
+				assert(status == 0);
+				varindices[actual] = index;
+
+				values[actual] = v;
+				actual++;
+			}
+		}
+		status = CPXaddmipstarts(env, lp, mcnt, nzcnt, beg, varindices, values, NULL, NULL);
+		fclose(fsol);
+	}
+
+
 	// only root node
 	if (only_root_node)
 		status = CPXsetintparam(env, CPXPARAM_MIP_Limits_Nodes, 0);
@@ -159,10 +186,10 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	status = CPXsetintparam(env, 1035, CPX_ON);
 
 	// threads
-	status = CPXsetintparam(env, 1067, 10);
+	// status = CPXsetintparam(env, 1067, 10);
 
 	// stop at mip gap
-	status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0005);
+	//status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0005);
 	status = CPXsetdblparam (env, CPX_PARAM_WORKMEM, 60*1024.0); // at most 1G RAM
 	status = CPXsetintparam (env, CPX_PARAM_NODEFILEIND, 2); // write node files to disk, uncompressed
 	status = CPXsetintparam (env, CPX_PARAM_VARSEL, 2); // use strong branching
@@ -238,6 +265,16 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 			int index = cell*servers + server-1;
 			map[cell][server] = round(x[index]);
 		}
+	}
+
+	{
+		FILE *f = fopen(solfilename, "wb");
+		for(int i=0; i < opt_atu; i++) {
+			for(int s=1; s <= servers; s++) {
+				fprintf(f, "%d:%d=%d\n", i, s, map[i][s]);
+			}
+		}
+		fclose(f);
 	}
 
 	//print_instance_and_solution_fo_file(opt_data, opt_atu, servers, map);
