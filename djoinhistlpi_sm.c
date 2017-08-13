@@ -189,7 +189,7 @@ void lpi_sm_optimize_hr(dataset_histogram *hr, int servers,
 	// status = CPXsetintparam(env, 1067, 10);
 
 	// stop at mip gap
-	//status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.0005);
+	status = CPXsetdblparam (env, CPXPARAM_MIP_Tolerances_MIPGap, (double)0.000001);
 	status = CPXsetdblparam (env, CPX_PARAM_WORKMEM, 60*1024.0); // at most 1G RAM
 	status = CPXsetintparam (env, CPX_PARAM_NODEFILEIND, 2); // write node files to disk, uncompressed
 	status = CPXsetintparam (env, CPX_PARAM_VARSEL, 2); // use strong branching

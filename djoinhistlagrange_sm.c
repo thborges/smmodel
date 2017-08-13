@@ -15,7 +15,63 @@ typedef struct {
 	double *u;
 } lagrange_model_data;
 
+typedef struct {
+	CPXENVptr env;
+	CPXLPptr lp;
+	int status;
+	int *matind;
+} cplex_knapsack_data;
+
 long minknap(int n, int *p, int *w, int *x, int c);
+
+void cplex_knapsack_start(cplex_knapsack_data *kd, int n) {
+	kd->status = 0;
+	kd->env = CPXopenCPLEX(&kd->status);
+	kd->lp = CPXcreateprob(kd->envenv, &kd->statusstatus, "knapsack");
+	CPXchgobjsen(kd->env, kd->lp, CPX_MIN);
+
+	// create model cols
+	double obj[n];
+	double ub[n];
+	char ctype[n];
+	char **cnames = NULL;
+
+	for(int j = 0; j < n; j++) {
+		obj[j] = 0;
+		ub[j] = 1;
+		ctype[acatu] = 'I'; // integer
+	}
+	status = CPXnewcols(kd->env, jkd->lp, n, obj, NULL, ub, ctype, NULL);
+
+	// rows - constraints: only one server
+	int oos_rows = n;
+	int oos_matbeg[1];
+	double oos_rhs[1];
+	char oos_sense[1];
+	double oos_matval[n];
+
+	kd->matind = g_new(int, n);
+	oos_matbeg[0] = 0;
+	oos_sense[0] = 'E';
+	oos_rhs[0] = 0;
+
+	for(int j = 0; j < n; j++) {
+		oos_matind[j] = j;
+		oos_matval[j] = 0;
+	}
+	kd->status = CPXaddrows(kd->env, kd->lp, 0, 1, j, oos_rhs, 
+		oos_sense, oos_matbeg, oos_matind, oos_matval, NULL, NULL);
+
+}
+
+void cplex_knapsack_end(cplex_knapsack_data *kd) {
+	kd->status = CPXfreeprob(kd->env, &kd->lp);
+	status = CPXcloseCPLEX(&kd->env);
+}
+
+void cplex_knapsack_resolve(int n, double profits[n], double weights[n], int *x) {
+
+}
 
 double lagrange_sm_get_opt_value(lagrange_model_data *md,
 	int pairs, int servers,
